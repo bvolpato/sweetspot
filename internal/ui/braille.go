@@ -43,15 +43,18 @@ func BrailleChart(
 	pxW := plotW * 2
 	pxH := chartH * 4
 
-	// Auto-range if minVal >= maxVal.
+	// Auto-range if minVal >= maxVal, using a robust upper cap so a single outlier spike
+	// does not flatten normal samples against the bottom of the graph.
 	lo, hi := minVal, maxVal
 	if hi <= lo {
+		var valid []float64
 		lo = math.MaxFloat64
 		hi = -math.MaxFloat64
 		for _, v := range values {
 			if !allowNegative && v < 0 {
 				continue
 			}
+			valid = append(valid, v)
 			if v < lo {
 				lo = v
 			}
@@ -59,11 +62,27 @@ func BrailleChart(
 				hi = v
 			}
 		}
-		if lo == math.MaxFloat64 {
+		if len(valid) == 0 {
 			lo, hi = 0, 10
 		} else {
 			if lo > 0 && minVal == 0 {
 				lo = 0
+			}
+			// If a single spike is > 3x the 90th percentile, cap the Y-axis cleanly so normal
+			// jitter remains visible while the spike still hits the top edge in coral.
+			if len(valid) >= 8 {
+				sorted := make([]float64, len(valid))
+				copy(sorted, valid)
+				for i := 1; i < len(sorted); i++ {
+					for j := i; j > 0 && sorted[j-1] > sorted[j]; j-- {
+						sorted[j-1], sorted[j] = sorted[j], sorted[j-1]
+					}
+				}
+				p90 := sorted[int(float64(len(sorted)-1)*0.90)]
+				softHi := math.Max(p90*2.5, 40.0)
+				if hi > softHi*1.4 {
+					hi = softHi
+				}
 			}
 			if hi-lo < 1.0 {
 				hi = lo + 1.0

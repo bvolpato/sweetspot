@@ -14,34 +14,40 @@ import (
 
 func (m *Model) View() string {
 	w := m.width
-	if w < 76 {
-		w = 76
+	if w < 80 {
+		w = 80
 	}
 	h := m.height
 	if h < 26 {
 		h = 26
 	}
 
-	var sections []string
-	sections = append(sections, m.renderHeader(w))
+	header := m.renderHeader(w)
+	footer := m.renderFooter(w)
+	bodyH := h - lipgloss.Height(header) - lipgloss.Height(footer)
+	if bodyH < 18 {
+		bodyH = 18
+	}
 
+	var body string
 	if m.pinning {
-		sections = append(sections, m.renderPinModal(w))
+		body = m.renderPinModal(w, bodyH)
 	} else {
 		switch m.tab {
 		case TabRadar:
-			sections = append(sections, m.renderRadarView(w, h))
+			body = m.renderRadarView(w, bodyH)
 		case TabSpots:
-			sections = append(sections, m.renderSpotsView(w))
+			body = m.renderSpotsView(w, bodyH)
 		case TabSpectrum:
-			sections = append(sections, m.renderSpectrumView(w))
+			body = m.renderSpectrumView(w, bodyH)
 		case TabAdvisor:
-			sections = append(sections, m.renderAdvisorView(w))
+			body = m.renderAdvisorView(w, bodyH)
 		}
 	}
 
-	sections = append(sections, m.renderFooter(w))
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	// Pin footer cleanly at the bottom of the terminal on every tab.
+	body = lipgloss.Place(w, bodyH, lipgloss.Left, lipgloss.Top, body)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
 func (m *Model) renderHeader(w int) string {
@@ -106,7 +112,7 @@ func (m *Model) renderHeader(w int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, row1, row2, " "+divider)
 }
 
-func (m *Model) renderRadarView(w, h int) string {
+func (m *Model) renderRadarView(w, bodyH int) string {
 	twoCol := w >= 104
 	cardW := w - 2
 	leftW := cardW
@@ -116,26 +122,27 @@ func (m *Model) renderRadarView(w, h int) string {
 		rightW = cardW - 1 - leftW
 	}
 
-	// Dynamically size Braille charts so the dashboard fills the terminal cleanly.
-	// Fixed chrome: header (3) + footer (2) + advisor card (5) + borders/headers inside 2 stacked rows (12) = ~22 rows.
-	availCharts := h - 24
+	// Budget rows cleanly across: top row + latency row + quick advisor (5 rows).
+	// Each card adds 2 border rows.
+	advisorH := 5
+	rem := bodyH - advisorH
 	if !twoCol {
-		availCharts = 6
+		rem = 24
 	}
-	topChartH := 4
-	latChartH := 4
-	if availCharts > 8 {
-		topChartH = min(4+(availCharts-8)/2, 8)
-		latChartH = min(4+(availCharts-8)-(topChartH-4), 8)
-	}
+	// Split remaining height ~54% top row, ~46% latency row.
+	topTotalH := max((rem*54)/100, 12)
+	latTotalH := max(rem-topTotalH, 9)
 
-	topCardH := 8 + topChartH
-	latCardH := 4 + latChartH
+	topCardInnerH := topTotalH - 2
+	latCardInnerH := latTotalH - 2
 
-	signalCard := m.renderSignalCard(leftW, topCardH, topChartH)
-	speedCard := m.renderSpeedCard(rightW, topCardH, topChartH)
-	gwCard := m.renderLatencyCard("Router Hop", m.gwStats, 10, 35, leftW, latCardH, latChartH)
-	wanCard := m.renderLatencyCard("Internet ("+m.opts.WANTarget+")", m.wanStats, 25, 70, rightW, latCardH, latChartH)
+	topChartH := max(topCardInnerH-7, 3)
+	latChartH := max(latCardInnerH-3, 3)
+
+	signalCard := m.renderSignalCard(leftW, topCardInnerH, topChartH)
+	speedCard := m.renderSpeedCard(rightW, topCardInnerH, topChartH)
+	gwCard := m.renderLatencyCard("Router Hop", m.gwStats, 10, 35, leftW, latCardInnerH, latChartH)
+	wanCard := m.renderLatencyCard("Internet ("+m.opts.WANTarget+")", m.wanStats, 25, 70, rightW, latCardInnerH, latChartH)
 	advisorStrip := m.renderQuickAdvisorCard(cardW)
 
 	if twoCol {
@@ -148,7 +155,15 @@ func (m *Model) renderRadarView(w, h int) string {
 
 func (m *Model) renderSignalCard(w, cardH, chartH int) string {
 	inner := w - 4
-	header := CardHeader("◉", "SIGNAL RADAR & SWEETSPOT", m.link.QualityLabel(), inner)
+	rightHeader := m.link.QualityLabel()
+	if m.link.Scheduler != "" {
+		q := m.link.Scheduler
+		if m.link.QoSMode != "" {
+			q += "/" + m.link.QoSMode
+		}
+		rightHeader = q + " · " + rightHeader
+	}
+	header := CardHeader("◉", "SIGNAL RADAR & SWEETSPOT", rightHeader, inner)
 
 	tower := RenderSignalTower(m.link.RSSI, m.link.Connected, m.link.IsEthernet)
 
@@ -183,57 +198,78 @@ func (m *Model) renderSignalCard(w, cardH, chartH int) string {
 		StyleMuted.Render(fmt.Sprintf("Spd %d/30", m.score.SpeedScore)),
 	)
 
-	sep := lipgloss.NewStyle().Foreground(ColBorder).Render("  │  \n  │  \n  │  ")
-	heroLeft := lipgloss.JoinHorizontal(lipgloss.Bottom, tower, "  ", bigRSSI, " ", unitCol)
-	heroRight := lipgloss.JoinHorizontal(lipgloss.Bottom, bigScore, " ", scoreMeta)
-	hero := lipgloss.JoinHorizontal(lipgloss.Bottom, heroLeft, sep, heroRight)
+	sep := lipgloss.NewStyle().Foreground(ColBorder).Render(" │ \n │ \n │ ")
+	heroParts := []string{
+		lipgloss.JoinHorizontal(lipgloss.Bottom, tower, " ", bigRSSI, " ", unitCol),
+		sep,
+		lipgloss.JoinHorizontal(lipgloss.Bottom, bigScore, " ", scoreMeta),
+	}
+
+	// Fill right side of wide hero row with live CCA Airtime or Effective Link Tile!
+	if inner >= 66 {
+		var thirdTile string
+		if m.link.HasCCA {
+			ccaCol := ColEmerald
+			ccaLbl := "CLEAN"
+			if m.link.CCAPct >= 65 {
+				ccaCol = ColCoral
+				ccaLbl = "BUSY"
+			} else if m.link.CCAPct >= 45 {
+				ccaCol = ColAmber
+				ccaLbl = "WARM"
+			}
+			thirdTile = lipgloss.JoinVertical(lipgloss.Left,
+				lipgloss.NewStyle().Bold(true).Foreground(ccaCol).Render(fmt.Sprintf("CCA %d%% ", m.link.CCAPct))+Badge(ccaLbl, ccaCol),
+				RenderBar(float64(m.link.CCAPct)/100.0, 16, ccaCol),
+				StyleMuted.Render("Channel airtime"),
+			)
+		} else if m.link.EffDownMbps > 0 {
+			thirdTile = lipgloss.JoinVertical(lipgloss.Left,
+				lipgloss.NewStyle().Bold(true).Foreground(ColTeal).Render(fmt.Sprintf("Eff %.0f Mbps", m.link.EffDownMbps)),
+				RenderBar(math.Min(m.link.EffDownMbps/500.0, 1.0), 16, ColTeal),
+				StyleMuted.Render(fmt.Sprintf("LQM %d/100", m.link.LinkQuality)),
+			)
+		}
+		if thirdTile != "" {
+			heroParts = append(heroParts, sep, thirdTile)
+		}
+	}
+	hero := lipgloss.JoinHorizontal(lipgloss.Bottom, heroParts...)
 
 	barFrac := (float64(m.link.RSSI) + 90.0) / 55.0
 	if m.link.IsEthernet {
 		barFrac = 1.0
 	}
-	meter := RenderGradientBar(barFrac, max(inner-2, 16))
+	meter := RenderGradientBar(barFrac, max(inner-1, 16))
 
-	extra := []string{
-		fmt.Sprintf("PHY %s", lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(fmt.Sprintf("%.0f Mbps", m.link.TxRateMbps))),
-		StyleValue.Render(m.link.PHYMode),
+	// Compact single-line radio strip (never wraps!).
+	parts := []string{
+		fmt.Sprintf("PHY %s", lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(fmt.Sprintf("%.0fM", m.link.TxRateMbps))),
+		StyleValue.Render(compactPHY(m.link.PHYMode)),
 	}
 	if m.link.EffDownMbps > 0 {
-		extra = append(extra, StyleSubtitle.Render(fmt.Sprintf("Eff %.0f Mbps", m.link.EffDownMbps)))
+		parts = append(parts, StyleSubtitle.Render(fmt.Sprintf("Eff %.0fM", m.link.EffDownMbps)))
 	}
 	if m.link.LinkQuality > 0 {
-		extra = append(extra, StyleSubtitle.Render(fmt.Sprintf("LQM %d", m.link.LinkQuality)))
-	}
-	if m.link.HasCCA {
-		ccaCol := ColEmerald
-		if m.link.CCAPct >= 65 {
-			ccaCol = ColCoral
-		} else if m.link.CCAPct >= 45 {
-			ccaCol = ColAmber
-		}
-		extra = append(extra, lipgloss.NewStyle().Bold(true).Foreground(ccaCol).Render(fmt.Sprintf("CCA %d%%", m.link.CCAPct)))
+		parts = append(parts, StyleSubtitle.Render(fmt.Sprintf("LQM %d", m.link.LinkQuality)))
 	}
 	if m.link.HasMCS {
-		mcsStr := fmt.Sprintf("MCS %d", m.link.MCS)
+		mcs := fmt.Sprintf("MCS %d", m.link.MCS)
 		if m.link.NSS > 0 {
-			mcsStr += fmt.Sprintf(" %dx%d", m.link.NSS, m.link.NSS)
+			mcs += fmt.Sprintf(" %dx%d", m.link.NSS, m.link.NSS)
 		}
-		extra = append(extra, StyleSubtitle.Render(mcsStr))
+		parts = append(parts, StyleSubtitle.Render(mcs))
 	}
 	if m.link.BSSID != "" {
-		bssidStr := m.link.BSSID
+		b := m.link.BSSID
 		if m.roamCount > 0 {
-			bssidStr += fmt.Sprintf(" (%d roams)", m.roamCount)
+			b += fmt.Sprintf(" (%dr)", m.roamCount)
 		}
-		extra = append(extra, StyleMuted.Render(bssidStr))
-	} else if m.link.Scheduler != "" {
-		q := m.link.Scheduler
-		if m.link.QoSMode != "" {
-			q += "/" + m.link.QoSMode
-		}
-		extra = append(extra, StyleMuted.Render(q))
+		parts = append(parts, StyleMuted.Render(b))
+	} else {
+		parts = append(parts, StyleMuted.Render(m.link.Security))
 	}
-	radio := strings.Join(extra, " · ")
+	radio := strings.Join(parts, " · ")
 
 	rssiChart := BrailleChart(m.rssiHist, inner, chartH, -85, -35, true, "dBm", func(v float64) lipgloss.Color {
 		return ColorForRSSI(int(v))
@@ -394,7 +430,7 @@ func (m *Model) renderLatencyCard(title string, st probe.PingStats, goodMax, war
 
 func (m *Model) renderQuickAdvisorCard(w int) string {
 	inner := w - 4
-	header := CardHeader("✦", "LIVE ADVISOR", "Press [4] for full breakdown · [Space] to pin this spot", inner)
+	header := CardHeader("✦", "LIVE ADVISOR", "Press [4] for full advisor & playbook · [Space] to pin spot", inner)
 	var lines []string
 	lines = append(lines, header)
 	shown := 0
@@ -416,87 +452,174 @@ func (m *Model) renderQuickAdvisorCard(w int) string {
 	return StyleCard.Width(w - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
-func (m *Model) renderSpotsView(w int) string {
-	inner := w - 4
+// Tab 2: Full-height Spots Leaderboard + Live Current vs. Selected Spot Comparison
+func (m *Model) renderSpotsView(w, bodyH int) string {
+	cardW := w - 2
+	inner := cardW - 4
 	ranked := m.spotsStore.Ranked()
-	header := CardHeader("★", "SPOT FINDER LEADERBOARD", "Walk around · press [Space] to pin · [d] delete · [e] export", inner)
 
-	if len(ranked) == 0 {
-		empty := lipgloss.JoinVertical(lipgloss.Left,
-			header,
-			"",
-			StyleValue.Render("No spots pinned yet."),
-			StyleSubtitle.Render("Walk to a desk or room, optionally run [b] for a quick speed burst, then press [Space] to pin it."),
-			StyleMuted.Render("SweetSpot ranks every spot side by side by RF signal, jitter, speed, and bufferbloat."),
-		)
-		return StyleCardHi.Width(w - 2).Render(empty)
-	}
+	topH := max((bodyH*56)/100-2, 9)
+	botH := max(bodyH-topH-4, 8)
 
-	best := ranked[0]
+	header := CardHeader("★", "SPOT FINDER LEADERBOARD", "[Space] pin here · [j/k] select · [d] delete · [e] export", inner)
 	var rows []string
 	rows = append(rows, header, "")
-	rows = append(rows, StyleMuted.Render(fmt.Sprintf("%-4s %-18s %-11s %-22s %-14s %-10s %-14s %-7s",
-		"RANK", "SPOT", "SCORE", "CHANNEL", "RSSI / SNR", "GW / WAN", "DOWN / UP", "RPM")))
 
-	for i, sp := range ranked {
-		rankLabel := fmt.Sprintf("#%d", i+1)
-		if i == 0 {
-			rankLabel = "★#1"
-		}
-		spd := "   -   "
-		if sp.DownloadMbps > 0 {
-			spd = fmt.Sprintf("%4.0f / %3.0f", sp.DownloadMbps, sp.UploadMbps)
-		}
-		rpm := "-"
-		if sp.LoadedRPM > 0 {
-			rpm = fmt.Sprintf("%d", sp.LoadedRPM)
-		}
-		line := fmt.Sprintf("%-4s %-18s %3d (%-2s)    %-22s %3d / %2d dB    %4.1f/%4.1f  %-14s %-7s",
-			rankLabel,
-			truncate(sp.Name, 18),
-			sp.Score.Total, sp.Score.Grade,
-			truncate(sp.ChannelLabel, 22),
-			sp.RSSI, sp.SNR,
-			sp.GatewayAvgMs, sp.WANAvgMs,
-			spd, rpm,
+	if len(ranked) == 0 {
+		rows = append(rows,
+			StyleValue.Render("No spots pinned yet -- walk to a desk or room and press [Space] to pin it."),
+			"",
+			StyleSubtitle.Render("Tip: run [b] for an 8-second speed burst at each spot before pinning so spots rank by RF, jitter, throughput, and bufferbloat."),
 		)
-		style := lipgloss.NewStyle().Foreground(ColText)
-		if i == 0 {
-			style = style.Foreground(ColEmerald).Bold(true)
-		}
-		if i == m.selectedIdx {
-			style = style.Background(ColTrack)
-		}
-		rows = append(rows, style.Render(line))
-	}
+	} else {
+		rows = append(rows, StyleMuted.Render(fmt.Sprintf("%-5s %-20s %-18s %-26s %-15s %-12s %-15s %-7s",
+			"RANK", "SPOT", "SCORE", "CHANNEL", "RSSI / SNR", "GW / WAN", "DOWN / UP", "RPM")))
 
-	if len(ranked) >= 2 {
-		worst := ranked[len(ranked)-1]
-		rows = append(rows, "", StyleSubtitle.Render(fmt.Sprintf(
-			"Winner: %s (+%d score, %+d dB SNR vs %s)",
-			best.Name, best.Score.Total-worst.Score.Total, best.SNR-worst.SNR, worst.Name,
-		)))
+		maxRows := max(topH-4, 3)
+		for i, sp := range ranked {
+			if i >= maxRows {
+				break
+			}
+			rankLabel := fmt.Sprintf("#%d", i+1)
+			if i == 0 {
+				rankLabel = "★#1"
+			}
+			spd := "     -     "
+			if sp.DownloadMbps > 0 {
+				spd = fmt.Sprintf("%5.0f / %4.0fM", sp.DownloadMbps, sp.UploadMbps)
+			}
+			rpm := "-"
+			if sp.LoadedRPM > 0 {
+				rpm = fmt.Sprintf("%d", sp.LoadedRPM)
+			}
+			scoreBar := RenderBar(float64(sp.Score.Total)/100.0, 8, ColorForScore(sp.Score.Total))
+			line := fmt.Sprintf("%-5s %-20s %3d (%-2s) %s  %-26s %3d / %2d dB     %4.1f / %4.1f  %-15s %-7s",
+				rankLabel,
+				truncate(sp.Name, 20),
+				sp.Score.Total, sp.Score.Grade, scoreBar,
+				truncate(sp.ChannelLabel, 26),
+				sp.RSSI, sp.SNR,
+				sp.GatewayAvgMs, sp.WANAvgMs,
+				spd, rpm,
+			)
+			style := lipgloss.NewStyle().Foreground(ColText)
+			if i == 0 {
+				style = style.Foreground(ColEmerald).Bold(true)
+			}
+			if i == m.selectedIdx {
+				style = style.Background(ColTrack)
+			}
+			rows = append(rows, style.Render(line))
+		}
 	}
+	topCard := StyleCardHi.Width(cardW - 2).Height(topH).Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 
-	return StyleCardHi.Width(w - 2).Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	// Bottom split: Selected Spot Inspector (left) vs. Live Here Now (right)
+	leftW := (cardW - 1) / 2
+	rightW := cardW - 1 - leftW
+
+	var selLines []string
+	selInner := leftW - 4
+	if len(ranked) > 0 && m.selectedIdx < len(ranked) {
+		sp := ranked[m.selectedIdx]
+		best := ranked[0]
+		selLines = append(selLines,
+			CardHeader("◎", "SELECTED SPOT: "+strings.ToUpper(sp.Name), sp.Timestamp.Format("15:04:05"), selInner),
+			"",
+			fmt.Sprintf("Score %s  ·  %s  ·  PHY %.0f Mbps",
+				Badge(fmt.Sprintf("%d/100 · %s", sp.Score.Total, sp.Score.Grade), ColorForScore(sp.Score.Total)),
+				StyleValue.Render(sp.ChannelLabel), sp.TxRateMbps),
+			fmt.Sprintf("RF: %d dBm / %d dB SNR (Noise %d dBm)  ·  Loss %.1f%%", sp.RSSI, sp.SNR, sp.Noise, sp.LossPct),
+			fmt.Sprintf("Latency: Router %.1f ms (jitter %.1f ms)  ·  WAN %.1f ms", sp.GatewayAvgMs, sp.GatewayJitMs, sp.WANAvgMs),
+		)
+		if sp.DownloadMbps > 0 {
+			selLines = append(selLines, fmt.Sprintf("Speed: ↓ %.1f Mbps  ↑ %.1f Mbps  ·  Loaded %d RPM (+%.0f ms)",
+				sp.DownloadMbps, sp.UploadMbps, sp.LoadedRPM, sp.BloatDeltaMs))
+		} else {
+			selLines = append(selLines, StyleMuted.Render("Speed: not measured at pin time (run [b] before pinning)"))
+		}
+		if m.selectedIdx == 0 {
+			selLines = append(selLines, "", lipgloss.NewStyle().Foreground(ColEmerald).Bold(true).Render("★ Currently your #1 ranked spot!"))
+		} else {
+			selLines = append(selLines, "", StyleSubtitle.Render(fmt.Sprintf("Vs #1 (%s): %+d score, %+d dB SNR, %+.1f ms router RTT",
+				best.Name, sp.Score.Total-best.Score.Total, sp.SNR-best.SNR, sp.GatewayAvgMs-best.GatewayAvgMs)))
+		}
+	} else {
+		selLines = append(selLines,
+			CardHeader("◎", "HOW TO FIND YOUR SWEET SPOT", "", selInner),
+			"",
+			StyleSubtitle.Render("1. Stand at spot #1 (e.g. your desk) and press [b] then [Space]."),
+			StyleSubtitle.Render("2. Walk to spot #2 (window, couch, another room) and press [Space]."),
+			StyleSubtitle.Render("3. Compare RSSI, SNR, router jitter, and throughput side by side."),
+			StyleSubtitle.Render("4. Press [e] to export a Markdown leaderboard + advice report."),
+		)
+	}
+	leftCard := StyleCard.Width(leftW - 2).Height(botH).Render(lipgloss.JoinVertical(lipgloss.Left, selLines...))
+
+	nowInner := rightW - 4
+	tower := RenderSignalTower(m.link.RSSI, m.link.Connected, m.link.IsEthernet)
+	nowCol := ColorForScore(m.score.Total)
+	nowSummary := lipgloss.JoinVertical(lipgloss.Left,
+		fmt.Sprintf("%s  %s", Badge(fmt.Sprintf("%d/100 · %s", m.score.Total, m.score.Grade), nowCol), StyleValue.Render(m.link.ChannelLabel())),
+		fmt.Sprintf("RF: %d dBm / %d dB SNR · PHY %.0f Mbps", m.link.RSSI, m.link.SNR, m.link.TxRateMbps),
+		fmt.Sprintf("Router %.1f ms (jit %.1f) · WAN %.1f ms", m.gwStats.AvgMs, m.gwStats.JitterMs, m.wanStats.AvgMs),
+		StyleMuted.Render("Press [Space] to pin your current location"),
+	)
+	diffLine := StyleMuted.Render("Pin at least one spot to see live delta vs. your best spot.")
+	if len(ranked) > 0 {
+		best := ranked[0]
+		delta := m.score.Total - best.Score.Total
+		dCol := ColAmber
+		if delta > 0 {
+			dCol = ColEmerald
+		} else if delta < -5 {
+			dCol = ColCoral
+		}
+		diffLine = lipgloss.NewStyle().Bold(true).Foreground(dCol).Render(
+			fmt.Sprintf("Live vs #1 (%s): %+d score, %+d dB SNR", best.Name, delta, m.link.SNR-best.SNR))
+	}
+	rightCard := StyleCard.Width(rightW - 2).Height(botH).Render(lipgloss.JoinVertical(lipgloss.Left,
+		CardHeader("●", "LIVE HERE NOW", "Walk-around preview", nowInner),
+		"",
+		lipgloss.JoinHorizontal(lipgloss.Bottom, tower, "  ", nowSummary),
+		"",
+		diffLine,
+	))
+
+	botRow := lipgloss.JoinHorizontal(lipgloss.Top, leftCard, " ", rightCard)
+	return lipgloss.JoinVertical(lipgloss.Left, topCard, botRow)
 }
 
-func (m *Model) renderSpectrumView(w int) string {
-	inner := w - 4
+// Tab 3: Full-height RF Channel Spectrum + Single-Line DNS Resolver Race
+func (m *Model) renderSpectrumView(w, bodyH int) string {
+	cardW := w - 2
+	inner := cardW - 4
+
+	dnsH := 10
+	rfH := max(bodyH-dnsH-4, 12)
 
 	rfRight := "Press [s] to scan nearby channels"
 	if m.scanning {
 		rfRight = m.spinner.View() + " scanning..."
 	} else if m.scan.TotalAPs > 0 {
-		rfRight = fmt.Sprintf("%d APs · best 5 GHz: Ch %d (non-DFS Ch %d) · best 2.4 GHz: Ch %d",
+		rfRight = fmt.Sprintf("%d APs · Best 5 GHz: Ch %d (non-DFS Ch %d) · Best 2.4 GHz: Ch %d",
 			m.scan.TotalAPs, m.scan.Best5GHzChannel, m.scan.Best5GHzNonDFS, m.scan.Best2GHzChannel)
 	}
 	rfHeader := CardHeader("▤", "RF CHANNEL CONGESTION", rfRight, inner)
 
 	var rfLines []string
-	rfLines = append(rfLines, rfHeader)
+	rfLines = append(rfLines, rfHeader, "")
 	if len(m.scan.Buckets) == 0 {
-		rfLines = append(rfLines, StyleSubtitle.Render("No RF scan yet. Press [s] to scan neighboring APs (takes ~2-4s, skipped during idle monitoring to avoid scan jitter)."))
+		rfLines = append(rfLines,
+			fmt.Sprintf("%s  %s", Badge("PRESS [s]", ColCyan), StyleValue.Render("Run an on-demand RF neighborhood scan")),
+			"",
+			StyleSubtitle.Render("Scanning is on-demand so idle latency monitoring never suffers off-channel ping spikes."),
+			"",
+			StyleMuted.Render("Channel guide:"),
+			StyleSubtitle.Render("  • 2.4 GHz:  Only Channels 1, 6, and 11 are non-overlapping (keep 20 MHz in apartments)."),
+			StyleSubtitle.Render("  • 5 GHz:    80 MHz blocks are UNII-1 (36-48), DFS (52-64, 100-144), and UNII-3 (149-161)."),
+			StyleSubtitle.Render("  • 6 GHz:    Cleanest wide 80/160 MHz channels (requires Wi-Fi 6E/7 router + WPA3)."),
+		)
 	} else {
 		maxCount := 1
 		for _, b := range m.scan.Buckets {
@@ -504,10 +627,10 @@ func (m *Model) renderSpectrumView(w int) string {
 				maxCount = b.Count
 			}
 		}
-		barW := max(inner-46, 12)
-		shown := 0
-		for _, b := range m.scan.Buckets {
-			if shown >= 14 {
+		barW := max(inner-60, 12)
+		maxRows := max(rfH-4, 6)
+		for i, b := range m.scan.Buckets {
+			if i >= maxRows {
 				break
 			}
 			col := ColCyan
@@ -524,43 +647,44 @@ func (m *Model) renderSpectrumView(w int) string {
 			} else if b.IsRecommended {
 				tag = " " + Badge("CLEAN", ColEmerald)
 			}
-			sigStr := ""
+			sigStr := "           "
 			if b.MaxRSSI != 0 {
-				sigStr = fmt.Sprintf("max %d dBm", b.MaxRSSI)
+				sigStr = fmt.Sprintf("max %3d dBm", b.MaxRSSI)
 			}
-			rfLines = append(rfLines, fmt.Sprintf("%-7s Ch %-3d (%3dMHz) %s %2d APs %s%s",
+			rfLines = append(rfLines, fmt.Sprintf("%-7s Ch %-3d (%3dMHz) %s %2d APs  %s%s",
 				b.Band, b.Channel, b.MaxWidthMHz,
 				RenderBar(float64(b.Count)/float64(maxCount), barW, col),
 				b.Count, StyleMuted.Render(sigStr), tag,
 			))
-			shown++
 		}
 	}
-	rfCard := StyleCard.Width(w - 2).Render(lipgloss.JoinVertical(lipgloss.Left, rfLines...))
+	rfCard := StyleCardHi.Width(cardW - 2).Height(rfH).Render(lipgloss.JoinVertical(lipgloss.Left, rfLines...))
 
+	// DNS Resolver Race -- strictly single-line rows!
 	dnsRight := "Press [r] to re-race"
 	if m.dnsRunning {
 		dnsRight = m.spinner.View() + " racing..."
 	} else if len(m.link.DNSServers) > 0 {
-		dnsRight = "Active: " + strings.Join(m.link.DNSServers, ", ")
+		dnsRight = "Configured: " + strings.Join(m.link.DNSServers, ", ")
 	}
 	dnsHeader := CardHeader("⌁", "DNS RESOLVER RACE", dnsRight, inner)
 
 	var dnsLines []string
-	dnsLines = append(dnsLines, dnsHeader)
+	dnsLines = append(dnsLines, dnsHeader, "")
 	if len(m.dns.Entries) == 0 {
 		dnsLines = append(dnsLines, StyleSubtitle.Render("Racing DNS resolvers..."))
 	} else {
-		maxMs := 60.0
+		maxMs := 55.0
 		for _, e := range m.dns.Entries {
 			if e.UncachedMs > maxMs {
 				maxMs = e.UncachedMs
 			}
 		}
-		barW := max(inner-52, 12)
+		// Reserve fixed space: prefix (27) + metrics (34) + FASTEST badge (10) = 71 chars
+		barW := max(inner-72, 10)
 		for _, e := range m.dns.Entries {
 			if e.Failed {
-				dnsLines = append(dnsLines, fmt.Sprintf("%-11s (%-11s) %s", e.Name, e.Server, StyleMuted.Render("timeout")))
+				dnsLines = append(dnsLines, fmt.Sprintf("%-11s (%-11s)  %s", e.Name, e.Server, StyleMuted.Render("timeout")))
 				continue
 			}
 			col := ColorForLatency(e.UncachedMs, 25, 45)
@@ -568,46 +692,111 @@ func (m *Model) renderSpectrumView(w int) string {
 			if !e.IsSystem && e.Server == m.dns.Fastest.Server {
 				tag = " " + Badge("FASTEST", ColEmerald)
 			}
-			dnsLines = append(dnsLines, fmt.Sprintf("%-11s (%-11s) %s uncached %5.1fms · cached %5.1fms%s",
+			dnsLines = append(dnsLines, fmt.Sprintf("%-11s (%-11s) %s  uncached %5.1fms · cached %5.1fms%s",
 				e.Name, e.Server,
 				RenderBar(e.UncachedMs/maxMs, barW, col),
 				e.UncachedMs, e.CachedMs, tag,
 			))
 		}
+		if !m.dns.System.Failed && !m.dns.Fastest.Failed && m.dns.System.UncachedMs-m.dns.Fastest.UncachedMs >= 10 {
+			dnsLines = append(dnsLines, "", StyleMuted.Render(fmt.Sprintf(
+				"Note: %s (%s) is %.1f ms faster uncached than System DNS (corporate DNS proxies like Scout add ~15-20 ms on managed laptops).",
+				m.dns.Fastest.Name, m.dns.Fastest.Server, m.dns.System.UncachedMs-m.dns.Fastest.UncachedMs)))
+		}
 	}
-	dnsCard := StyleCard.Width(w - 2).Render(lipgloss.JoinVertical(lipgloss.Left, dnsLines...))
+	dnsCard := StyleCard.Width(cardW - 2).Height(dnsH).Render(lipgloss.JoinVertical(lipgloss.Left, dnsLines...))
 
 	return lipgloss.JoinVertical(lipgloss.Left, rfCard, dnsCard)
 }
 
-func (m *Model) renderAdvisorView(w int) string {
-	inner := w - 4
-	modemRight := "Press [m] to analyze cable modem stats from clipboard"
-	if m.modem.Parsed {
-		modemRight = fmt.Sprintf("Modem: %s · Down %.1f..%.1f dBmV · SNR %.1f dB · Up %.1f dBmV",
-			m.modem.Health, m.modem.DownPowerMin, m.modem.DownPowerMax, m.modem.DownSNRMin, m.modem.UpPowerMax)
+// Tab 4: Full-height 2-column Active Advisor + Complete Optimization Playbook & Modem Doctor
+func (m *Model) renderAdvisorView(w, bodyH int) string {
+	cardW := w - 2
+	twoCol := w >= 112
+	leftW := cardW
+	rightW := cardW
+	if twoCol {
+		leftW = (cardW * 62) / 100
+		rightW = cardW - 1 - leftW
 	}
-	header := CardHeader("✦", "NETWORK & MODEM ADVISOR", modemRight, inner)
+	cardH := max(bodyH-2, 14)
 
-	var lines []string
-	lines = append(lines, header, "")
-	for _, a := range m.advice {
-		lines = append(lines, fmt.Sprintf("%s %s %s",
-			severityBadge(a.Severity),
-			StyleMuted.Render("["+a.Category+"]"),
-			StyleValue.Render(a.Title),
-		))
-		lines = append(lines, "   "+StyleSubtitle.Render(a.Detail))
-		lines = append(lines, "   "+lipgloss.NewStyle().Foreground(ColTeal).Render("→ "+a.Action))
-		lines = append(lines, "")
+	// Left: Active prioritized findings (scrollable with j/k)
+	leftInner := leftW - 4
+	scrollHint := "[j/k] scroll · [m] paste cable modem stats"
+	if len(m.advice) > 0 && m.advisorScroll > 0 {
+		scrollHint = fmt.Sprintf("showing from #%d/%d · [j/k] scroll", m.advisorScroll+1, len(m.advice))
+	}
+	leftHeader := CardHeader("✦", fmt.Sprintf("ACTIVE FINDINGS (%d)", len(m.advice)), scrollHint, leftInner)
+
+	var leftLines []string
+	leftLines = append(leftLines, leftHeader, "")
+	usedRows := 2
+	for i := m.advisorScroll; i < len(m.advice); i++ {
+		if usedRows+4 > cardH {
+			leftLines = append(leftLines, StyleMuted.Render(fmt.Sprintf("↓ %d more finding(s) -- press [j] to scroll down", len(m.advice)-i)))
+			break
+		}
+		a := m.advice[i]
+		leftLines = append(leftLines,
+			fmt.Sprintf("%s %s %s", severityBadge(a.Severity), StyleMuted.Render("["+a.Category+"]"), StyleValue.Render(a.Title)),
+			"   "+StyleSubtitle.Render(truncate(a.Detail, leftInner-4)),
+			"   "+lipgloss.NewStyle().Foreground(ColTeal).Render("→ "+truncate(a.Action, leftInner-6)),
+			"",
+		)
+		usedRows += 4
 	}
 	if len(m.advice) == 0 {
-		lines = append(lines, StyleSubtitle.Render("Collecting measurements..."))
+		leftLines = append(leftLines, StyleSubtitle.Render("Collecting live measurements..."))
 	}
-	return StyleCardHi.Width(w - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	leftCard := StyleCardHi.Width(leftW - 2).Height(cardH).Render(lipgloss.JoinVertical(lipgloss.Left, leftLines...))
+
+	if !twoCol {
+		return leftCard
+	}
+
+	// Right: Vetted Optimization Playbook + Cable Modem Doctor
+	rightInner := rightW - 4
+	rightHeader := CardHeader("✓", "OPTIMIZATION PLAYBOOK", "Vetted checklist", rightInner)
+	var rightLines []string
+	rightLines = append(rightLines, rightHeader, "")
+	for _, item := range m.playbook {
+		var icon string
+		switch item.Status {
+		case "ok":
+			icon = lipgloss.NewStyle().Bold(true).Foreground(ColEmerald).Render("✓")
+		case "warn":
+			icon = lipgloss.NewStyle().Bold(true).Foreground(ColAmber).Render("▲")
+		default:
+			icon = lipgloss.NewStyle().Foreground(ColCyan).Render("○")
+		}
+		rightLines = append(rightLines,
+			fmt.Sprintf("%s %s", icon, StyleValue.Render(truncate(item.Title, rightInner-4))),
+			"  "+StyleMuted.Render(truncate(item.Note, rightInner-4)),
+		)
+	}
+
+	rightLines = append(rightLines, "", lipgloss.NewStyle().Foreground(ColBorder).Render(strings.Repeat("─", max(rightInner, 10))))
+	if m.modem.Parsed {
+		rightLines = append(rightLines,
+			lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render("DOCSIS Cable Modem ("+m.modem.Health+")"),
+			StyleSubtitle.Render(fmt.Sprintf("Down: %.1f..%.1f dBmV (%d QAM, %d OFDM)", m.modem.DownPowerMin, m.modem.DownPowerMax, m.modem.DownstreamCount, m.modem.OFDMCount)),
+			StyleSubtitle.Render(fmt.Sprintf("SNR: %.1f..%.1f dB · Up: %.1f dBmV (%d ch)", m.modem.DownSNRMin, m.modem.DownSNRMax, m.modem.UpPowerMax, m.modem.UpstreamCount)),
+			StyleMuted.Render(fmt.Sprintf("Uncorrectables: %d · Uptime: %s", m.modem.TotalUncorrectables, m.modem.Uptime)),
+		)
+	} else {
+		rightLines = append(rightLines,
+			lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render("Modem Doctor (DOCSIS 3.0/3.1)"),
+			StyleMuted.Render("Copy your router's Cable Connection table"),
+			StyleMuted.Render("(NETGEAR / ARRIS / Motorola) & press [m]."),
+		)
+	}
+	rightCard := StyleCard.Width(rightW - 2).Height(cardH).Render(lipgloss.JoinVertical(lipgloss.Left, rightLines...))
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftCard, " ", rightCard)
 }
 
-func (m *Model) renderPinModal(w int) string {
+func (m *Model) renderPinModal(w, bodyH int) string {
 	boxW := min(w-8, 60)
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render("★ Pin Current Spot"),
@@ -620,7 +809,7 @@ func (m *Model) renderPinModal(w int) string {
 		StyleMuted.Render("Press [Enter] to save (blank = auto name) · [Esc] to cancel"),
 	)
 	card := StyleCardHi.Width(boxW).Padding(1, 2).Render(content)
-	return lipgloss.PlaceHorizontal(w, lipgloss.Center, "\n"+card+"\n")
+	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, card)
 }
 
 func (m *Model) renderFooter(w int) string {
@@ -656,6 +845,21 @@ func severityBadge(s advisor.Severity) string {
 		return Badge("TIP", ColCyan)
 	default:
 		return Badge("GOOD", ColEmerald)
+	}
+}
+
+func compactPHY(phy string) string {
+	switch {
+	case strings.Contains(phy, "Wi-Fi 7"):
+		return "Wi-Fi 7 (be)"
+	case strings.Contains(phy, "Wi-Fi 6"):
+		return "Wi-Fi 6 (ax)"
+	case strings.Contains(phy, "Wi-Fi 5"):
+		return "Wi-Fi 5 (ac)"
+	case strings.Contains(phy, "Wi-Fi 4"):
+		return "Wi-Fi 4 (n)"
+	default:
+		return phy
 	}
 }
 

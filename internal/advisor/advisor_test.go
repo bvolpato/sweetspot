@@ -94,3 +94,45 @@ func TestDiagnose_Detects40MHzCapAndBufferbloat(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnose_CCASaturationAndNoDuplicateAirDrop(t *testing.T) {
+	link := wifi.LinkInfo{
+		Connected:     true,
+		Band:          wifi.Band5GHz,
+		Channel:       144,
+		WidthMHz:      20,
+		RSSI:          -60,
+		Noise:         -96,
+		SNR:           36,
+		TxRateMbps:    286,
+		Security:      "WPA3 Enterprise",
+		HasCCA:        true,
+		CCAPct:        72,
+		AirDropActive: true,
+	}
+	gw := probe.PingStats{Target: "10.43.16.1", Sent: 30, Received: 30, AvgMs: 18, MaxMs: 250, JitterMs: 35, SpikeCount: 4}
+	wan := probe.PingStats{Target: "1.1.1.1", Sent: 30, Received: 30, AvgMs: 15, MaxMs: 25, JitterMs: 3}
+
+	advice := Diagnose(link, gw, wan, probe.SpeedResult{}, wifi.ScanResult{}, probe.DNSRaceResult{}, ModemReport{})
+	airdropMentions := 0
+	foundCCA := false
+	for _, a := range advice {
+		if a.Category == "Airtime / CCA" && a.Severity == SeverityCritical {
+			foundCCA = true
+		}
+		if strings.Contains(a.Action, "AirDrop") || strings.Contains(a.Title, "AirDrop") {
+			airdropMentions++
+		}
+	}
+	if !foundCCA {
+		t.Fatalf("expected CRITICAL Airtime / CCA finding for 72%% CCA, got: %+v", advice)
+	}
+	if airdropMentions != 1 {
+		t.Fatalf("expected AirDrop advice once (no duplicate), got %d mentions in %+v", airdropMentions, advice)
+	}
+
+	playbook := BuildPlaybook(link, gw, probe.SpeedResult{}, wifi.ScanResult{}, probe.DNSRaceResult{}, ModemReport{})
+	if len(playbook) < 5 {
+		t.Fatalf("expected comprehensive playbook items, got %d", len(playbook))
+	}
+}

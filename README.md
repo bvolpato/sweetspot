@@ -66,9 +66,9 @@ sweetspot --json --modem cable-stats.txt
 If you start `sweetspot` with elevated privileges (`sudo sweetspot`), extra radio telemetry automatically appears (indicated by a `SUDO+` badge in the header):
 
 - **macOS (`sudo sweetspot` via `wdutil info`):**
-  - **Unredacted SSID and BSSID:** macOS hides the connected network name and AP MAC address from unprivileged processes without Location Services. With `sudo`, `sweetspot` displays the exact BSSID and counts silent **AP roams** as you walk across a floor.
   - **Channel airtime utilization (CCA %):** Shows how busy the radio channel actually is across all neighboring clients and APs, enabling the Advisor to detect airtime saturation even when RSSI is strong.
   - **MCS index, spatial streams (NSS), and guard interval:** Shows exact modulation (`MCS`) and whether the link is running 2x2 MIMO or dropped to 1x1.
+  - **SSID, BSSID, and AP roam tracking:** Displays unredacted SSID and BSSID (when Location Services permission is also granted to your terminal on macOS 15+) and counts silent AP roams as you walk across a floor.
 - **Linux (`sudo sweetspot` via `iw`):**
   - Unlocks active `iw dev <iface> scan` neighborhood scanning and `iw dev <iface> survey dump` channel busy time (CCA %) on kernels and distributions that restrict netlink Wi-Fi queries to `CAP_NET_ADMIN`.
 - **Windows:**

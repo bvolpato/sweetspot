@@ -94,10 +94,12 @@ type Model struct {
 	dns         probe.DNSRaceResult
 	dnsRunning  bool
 	modem       advisor.ModemReport
-	score       advisor.ScoreBreakdown
-	advice      []advisor.Advice
-	spotsStore  *spots.Store
-	selectedIdx int
+	score         advisor.ScoreBreakdown
+	advice        []advisor.Advice
+	playbook      []advisor.ChecklistItem
+	spotsStore    *spots.Store
+	selectedIdx   int
+	advisorScroll int
 
 	toast string
 }
@@ -348,10 +350,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "down":
 		if m.tab == TabSpots && m.selectedIdx < m.spotsStore.Len()-1 {
 			m.selectedIdx++
+		} else if m.tab == TabAdvisor && m.advisorScroll < max(len(m.advice)-1, 0) {
+			m.advisorScroll++
 		}
 	case "k", "up":
 		if m.tab == TabSpots && m.selectedIdx > 0 {
 			m.selectedIdx--
+		} else if m.tab == TabAdvisor && m.advisorScroll > 0 {
+			m.advisorScroll--
 		}
 	case "d", "backspace":
 		if m.tab == TabSpots {
@@ -432,6 +438,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) recompute() {
 	m.score = advisor.ComputeScore(m.link, m.gwStats, m.wanStats, m.speed)
 	m.advice = advisor.Diagnose(m.link, m.gwStats, m.wanStats, m.speed, m.scan, m.dns, m.modem)
+	m.playbook = advisor.BuildPlaybook(m.link, m.gwStats, m.speed, m.scan, m.dns, m.modem)
+	if m.advisorScroll >= len(m.advice) && len(m.advice) > 0 {
+		m.advisorScroll = len(m.advice) - 1
+	}
 }
 
 func (m *Model) scheduleTick() tea.Cmd {
