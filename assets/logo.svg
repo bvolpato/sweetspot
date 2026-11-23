@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="sweetspot Go Gopher Wi-Fi logo">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="38%" r="62%">
+      <stop offset="0%" stop-color="#1E293B"/>
+      <stop offset="65%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#090E1A"/>
+    </radialGradient>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="50%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="bodyGrad" x1="25%" y1="15%" x2="80%" y2="95%">
+      <stop offset="0%" stop-color="#8CE8F3"/>
+      <stop offset="52%" stop-color="#6AD7E5"/>
+      <stop offset="100%" stop-color="#48B8C8"/>
+    </linearGradient>
+    <linearGradient id="bellyGrad" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#BDF2F9" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#7EE0EC" stop-opacity="0.18"/>
+    </linearGradient>
+    <radialGradient id="bulbGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#6EE7B7"/>
+      <stop offset="55%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </radialGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="badgeClip">
+      <circle cx="256" cy="256" r="236"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer badge -->
+  <circle cx="256" cy="256" r="244" fill="url(#ringGrad)"/>
+  <circle cx="256" cy="256" r="236" fill="url(#bgGrad)"/>
+
+  <!-- Subtle radar rings in background -->
+  <g clip-path="url(#badgeClip)" fill="none" stroke="#38BDF8" stroke-opacity="0.09" stroke-width="2">
+    <circle cx="256" cy="142" r="78"/>
+    <circle cx="256" cy="142" r="134"/>
+    <circle cx="256" cy="142" r="192"/>
+    <line x1="256" y1="20" x2="256" y2="492" stroke-dasharray="4 8"/>
+    <line x1="20" y1="256" x2="492" y2="256" stroke-dasharray="4 8"/>
+  </g>
+
+  <!-- Radiating Wi-Fi signal waves above antenna -->
+  <g fill="none" stroke-linecap="round" filter="url(#softGlow)">
+    <path d="M 224 126 A 42 42 0 0 1 288 126" stroke="#34D399" stroke-width="10.5"/>
+    <path d="M 202 103 A 70 70 0 0 1 310 103" stroke="#2DD4BF" stroke-width="10.5" stroke-opacity="0.93"/>
+    <path d="M 180 80 A 98 98 0 0 1 332 80" stroke="#38BDF8" stroke-width="10.5" stroke-opacity="0.86"/>
+  </g>
+
+  <!-- Sparkle accents -->
+  <g fill="#38BDF8" opacity="0.75">
+    <circle cx="132" cy="138" r="4"/>
+    <circle cx="384" cy="128" r="3.5" fill="#A78BFA"/>
+    <circle cx="114" cy="212" r="2.5" fill="#34D399"/>
+    <circle cx="398" cy="198" r="3" fill="#2DD4BF"/>
+  </g>
+
+  <!-- Gopher clipped smoothly inside badge -->
+  <g clip-path="url(#badgeClip)">
+
+    <!-- Antenna stalk + base + glowing tip -->
+    <g>
+      <!-- Antenna base mount -->
+      <ellipse cx="256" cy="204" rx="22" ry="9" fill="#334155" stroke="#0B1120" stroke-width="5"/>
+      <!-- Stalk -->
+      <line x1="256" y1="200" x2="256" y2="154" stroke="#0B1120" stroke-width="14" stroke-linecap="round"/>
+      <line x1="256" y1="200" x2="256" y2="154" stroke="#CBD5E1" stroke-width="6" stroke-linecap="round"/>
+      <!-- Glowing beacon orb -->
+      <circle cx="256" cy="146" r="18" fill="#34D399" opacity="0.28" filter="url(#glow)"/>
+      <circle cx="256" cy="146" r="13" fill="url(#bulbGlow)" stroke="#0B1120" stroke-width="4.5"/>
+      <circle cx="251.5" cy="141.5" r="4" fill="#ECFDF5" opacity="0.9"/>
+    </g>
+
+    <!-- Ears (behind head) -->
+    <g stroke="#0B1120" stroke-width="6.5" stroke-linejoin="round">
+      <!-- Left ear -->
+      <ellipse cx="164" cy="226" rx="28" ry="25" transform="rotate(-24 164 226)" fill="#6AD7E5"/>
+      <ellipse cx="165" cy="227" rx="14" ry="12" transform="rotate(-24 165 227)" fill="#1E293B" stroke="none"/>
+      <!-- Right ear -->
+      <ellipse cx="348" cy="226" rx="28" ry="25" transform="rotate(24 348 226)" fill="#6AD7E5"/>
+      <ellipse cx="347" cy="227" rx="14" ry="12" transform="rotate(24 347 227)" fill="#1E293B" stroke="none"/>
+    </g>
+
+    <!-- Main Gopher body -->
+    <path d="M 142 350
+             C 142 232, 174 196, 256 196
+             C 338 196, 370 232, 370 350
+             C 370 444, 336 476, 256 476
+             C 176 476, 142 444, 142 350 Z"
+          fill="url(#bodyGrad)" stroke="#0B1120" stroke-width="7" stroke-linejoin="round"/>
+
+    <!-- Soft belly highlight -->
+    <ellipse cx="256" cy="396" rx="68" ry="62" fill="url(#bellyGrad)"/>
+
+    <!-- Little feet -->
+    <g fill="#F3D2B3" stroke="#0B1120" stroke-width="6" stroke-linejoin="round">
+      <ellipse cx="204" cy="466" rx="30" ry="16" transform="rotate(-8 204 466)"/>
+      <ellipse cx="308" cy="466" rx="30" ry="16" transform="rotate(8 308 466)"/>
+    </g>
+
+    <!-- Left eye (classic Go Gopher big white eye looking slightly up-right) -->
+    <g>
+      <circle cx="212" cy="264" r="34" fill="#FFFFFF" stroke="#0B1120" stroke-width="6.5"/>
+      <circle cx="220" cy="256" r="14" fill="#0B1120"/>
+      <circle cx="225" cy="250" r="5" fill="#FFFFFF"/>
+      <circle cx="215" cy="262" r="2.2" fill="#FFFFFF" opacity="0.75"/>
+    </g>
+
+    <!-- Right eye -->
+    <g>
+      <circle cx="298" cy="264" r="34" fill="#FFFFFF" stroke="#0B1120" stroke-width="6.5"/>
+      <circle cx="291" cy="256" r="14" fill="#0B1120"/>
+      <circle cx="296" cy="250" r="5" fill="#FFFFFF"/>
+      <circle cx="286" cy="262" r="2.2" fill="#FFFFFF" opacity="0.75"/>
+    </g>
+
+    <!-- Cute rosy cheeks -->
+    <ellipse cx="176" cy="306" rx="14" ry="8" fill="#FB7185" opacity="0.32"/>
+    <ellipse cx="336" cy="306" rx="14" ry="8" fill="#FB7185" opacity="0.32"/>
+
+    <!-- Buck teeth (behind muzzle lip) -->
+    <g fill="#FFFFFF" stroke="#0B1120" stroke-width="5.5" stroke-linejoin="round">
+      <rect x="237" y="318" width="19" height="27" rx="6"/>
+      <rect x="256" y="318" width="19" height="27" rx="6"/>
+    </g>
+
+    <!-- Muzzle (two cute rounded cheeks) -->
+    <g fill="#F3D2B3" stroke="#0B1120" stroke-width="6" stroke-linejoin="round">
+      <ellipse cx="236" cy="312" rx="27" ry="18"/>
+      <ellipse cx="276" cy="312" rx="27" ry="18"/>
+    </g>
+    <!-- Smooth inner join of muzzle -->
+    <ellipse cx="256" cy="311" rx="20" ry="14" fill="#F3D2B3"/>
+
+    <!-- Cute shiny nose -->
+    <ellipse cx="256" cy="297" rx="19" ry="12" fill="#2D1F18" stroke="#0B1120" stroke-width="4.5"/>
+    <ellipse cx="250" cy="293" rx="5.5" ry="2.8" fill="#FFFFFF" opacity="0.55" transform="rotate(-14 250 293)"/>
+
+    <!-- Left paw raised happily pointing up toward the signal -->
+    <g fill="#F3D2B3" stroke="#0B1120" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 152 346 C 118 334, 102 308, 114 288 C 124 272, 146 280, 152 300 C 156 312, 158 328, 162 340"/>
+    </g>
+
+    <!-- Handheld sweetspot signal meter held on the right side -->
+    <g transform="translate(328, 326) rotate(8)">
+      <!-- Device shell -->
+      <rect x="0" y="0" width="76" height="92" rx="14" fill="#1E293B" stroke="#0B1120" stroke-width="6"/>
+      <!-- Mini device antenna -->
+      <line x1="60" y1="0" x2="64" y2="-20" stroke="#0B1120" stroke-width="9" stroke-linecap="round"/>
+      <line x1="60" y1="0" x2="64" y2="-20" stroke="#94A3B8" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="64" cy="-22" r="5" fill="#38BDF8" stroke="#0B1120" stroke-width="3"/>
+      <!-- Screen -->
+      <rect x="10" y="12" width="56" height="52" rx="7" fill="#090E1A" stroke="#334155" stroke-width="2.5"/>
+      <!-- 4 glowing signal bars on screen -->
+      <rect x="17" y="45" width="7" height="12" rx="2" fill="#FBBF24"/>
+      <rect x="28" y="37" width="7" height="20" rx="2" fill="#38BDF8"/>
+      <rect x="39" y="28" width="7" height="29" rx="2" fill="#2DD4BF"/>
+      <rect x="50" y="19" width="7" height="38" rx="2" fill="#34D399"/>
+      <!-- Status LEDs under screen -->
+      <circle cx="24" cy="77" r="4" fill="#34D399"/>
+      <rect x="36" y="74" width="24" height="6" rx="3" fill="#475569"/>
+    </g>
+
+    <!-- Right paw gripping the lower-left edge of the signal meter -->
+    <g fill="#F3D2B3" stroke="#0B1120" stroke-width="6" stroke-linejoin="round">
+      <ellipse cx="332" cy="404" rx="22" ry="13" transform="rotate(-14 332 404)"/>
+    </g>
+
+  </g>
+</svg>

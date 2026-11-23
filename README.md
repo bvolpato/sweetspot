@@ -1,4 +1,8 @@
-# sweetspot
+<p align="center">
+  <img src="assets/logo.svg" alt="sweetspot Go Gopher Wi-Fi logo" width="180" />
+</p>
+
+<h1 align="center">sweetspot</h1>
 
 `sweetspot` is an interactive terminal dashboard for finding the best Wi-Fi spot in a home or office and diagnosing real network bottlenecks.
 
