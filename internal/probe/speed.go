@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os/exec"
@@ -13,26 +14,38 @@ import (
 	"time"
 )
 
-const (
-	cloudflareDownURL = "https://speed.cloudflare.com/__down?bytes=25000000"
-	cloudflareUpURL   = "https://speed.cloudflare.com/__up"
-)
+type speedEndpoint struct {
+	name   string
+	url    string
+	method string
+}
+
+var downloadEndpoints = []speedEndpoint{
+	{name: "apple-cdn", url: "https://mensura.cdn-apple.com/api/v1/gm/large", method: http.MethodGet},
+	{name: "cloudflare", url: "https://speed.cloudflare.com/__down?bytes=25000000", method: http.MethodGet},
+	{name: "hetzner", url: "https://ash-speed.hetzner.com/100MB.bin", method: http.MethodGet},
+}
+
+var uploadEndpoints = []speedEndpoint{
+	{name: "cloudflare", url: "https://speed.cloudflare.com/__up", method: http.MethodPost},
+	{name: "apple-cdn", url: "https://mensura.cdn-apple.com/api/v1/gm/slurp", method: http.MethodPost},
+}
 
 // SpeedResult captures a completed or in-progress throughput + bufferbloat measurement.
 type SpeedResult struct {
-	Timestamp     time.Time `json:"timestamp"`
-	Source        string    `json:"source"` // "cloudflare", "continuous", or "networkQuality"
-	Phase         string    `json:"phase"`  // "idle", "download", "upload", "networkQuality", "done"
-	DownloadMbps  float64   `json:"download_mbps"`
-	UploadMbps    float64   `json:"upload_mbps"`
-	IdleRTTMs     float64   `json:"idle_rtt_ms"`
-	LoadedRTTMs   float64   `json:"loaded_rtt_ms"`
-	BloatDeltaMs  float64   `json:"bloat_delta_ms"`
-	RPM           int       `json:"rpm"`
-	ECNEnabled    bool      `json:"ecn_enabled"`
-	L4SEnabled    bool      `json:"l4s_enabled"`
-	TestEndpoint  string    `json:"test_endpoint,omitempty"`
-	Err           string    `json:"error,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	Source       string    `json:"source"` // e.g. "apple-cdn", "cloudflare", "continuous", "networkQuality"
+	Phase        string    `json:"phase"`  // "idle", "download", "upload", "networkQuality", "done"
+	DownloadMbps float64   `json:"download_mbps"`
+	UploadMbps   float64   `json:"upload_mbps"`
+	IdleRTTMs    float64   `json:"idle_rtt_ms"`
+	LoadedRTTMs  float64   `json:"loaded_rtt_ms"`
+	BloatDeltaMs float64   `json:"bloat_delta_ms"`
+	RPM          int       `json:"rpm"`
+	ECNEnabled   bool      `json:"ecn_enabled"`
+	L4SEnabled   bool      `json:"l4s_enabled"`
+	TestEndpoint string    `json:"test_endpoint,omitempty"`
+	Err          string    `json:"error,omitempty"`
 }
 
 // SpeedProgress is emitted periodically during active probes so the UI animates live.
@@ -42,8 +55,9 @@ type SpeedProgress struct {
 	UploadMbps   float64
 }
 
-// RunSpeedBurst runs a fast parallel Cloudflare download + upload probe while sampling
-// loaded latency from wanRing to quantify bufferbloat.
+// RunSpeedBurst runs a multi-stream HTTP download + upload probe with automatic mirror
+// failover (avoiding HTTP 429 rate limits behind shared office NATs) while sampling
+// loaded latency to quantify bufferbloat.
 func RunSpeedBurst(
 	ctx context.Context,
 	downDuration time.Duration,
@@ -55,12 +69,12 @@ func RunSpeedBurst(
 ) SpeedResult {
 	res := SpeedResult{
 		Timestamp: time.Now(),
-		Source:    "cloudflare",
+		Source:    "burst",
 		Phase:     "download",
 		IdleRTTMs: idleRTTMs,
 	}
 	if streams <= 0 {
-		streams = 4
+		streams = 3
 	}
 
 	client := &http.Client{
@@ -84,32 +98,65 @@ func RunSpeedBurst(
 		}
 	}
 
-	// Phase 1: Download
-	downMbps, err := runDownloadPhase(ctx, client, downDuration, streams, func(mbps float64) {
-		recordLoaded()
-		if onProgress != nil {
-			onProgress(SpeedProgress{Phase: "download", DownloadMbps: mbps})
+	// Phase 1: Download with automatic endpoint failover on 429 / non-2xx / error.
+	var downMbps float64
+	var downSrc string
+	var lastDownErr error
+	for _, ep := range downloadEndpoints {
+		if ctx.Err() != nil {
+			break
 		}
-	})
-	if err != nil && downMbps == 0 {
-		res.Err = err.Error()
-		res.Phase = "done"
-		return res
+		mbps, err := runDownloadEndpoint(ctx, client, ep, downDuration, streams, func(live float64) {
+			recordLoaded()
+			if onProgress != nil {
+				onProgress(SpeedProgress{Phase: "download", DownloadMbps: live})
+			}
+		})
+		if mbps > 0 {
+			downMbps = mbps
+			downSrc = ep.name
+			lastDownErr = nil
+			break
+		}
+		if err != nil {
+			lastDownErr = err
+		}
 	}
 	res.DownloadMbps = downMbps
+	if lastDownErr != nil && downMbps == 0 {
+		res.Err = "download: " + lastDownErr.Error()
+	}
 
-	// Phase 2: Upload
+	// Phase 2: Upload with automatic endpoint failover.
 	res.Phase = "upload"
-	upMbps, err := runUploadPhase(ctx, client, upDuration, max(streams/2, 2), func(mbps float64) {
-		recordLoaded()
-		if onProgress != nil {
-			onProgress(SpeedProgress{Phase: "upload", DownloadMbps: downMbps, UploadMbps: mbps})
+	var upMbps float64
+	var lastUpErr error
+	for _, ep := range uploadEndpoints {
+		if ctx.Err() != nil {
+			break
 		}
-	})
-	if err != nil && upMbps == 0 && res.Err == "" {
-		res.Err = err.Error()
+		mbps, err := runUploadEndpoint(ctx, client, ep, upDuration, max(streams-1, 2), func(live float64) {
+			recordLoaded()
+			if onProgress != nil {
+				onProgress(SpeedProgress{Phase: "upload", DownloadMbps: downMbps, UploadMbps: live})
+			}
+		})
+		if mbps > 0 {
+			upMbps = mbps
+			lastUpErr = nil
+			break
+		}
+		if err != nil {
+			lastUpErr = err
+		}
 	}
 	res.UploadMbps = upMbps
+	if lastUpErr != nil && upMbps == 0 && res.Err == "" {
+		res.Err = "upload: " + lastUpErr.Error()
+	}
+	if downSrc != "" {
+		res.Source = downSrc
+	}
 
 	loadedMu.Lock()
 	if len(loadedSamples) > 0 {
@@ -135,12 +182,13 @@ func RunSpeedBurst(
 	return res
 }
 
-func runDownloadPhase(ctx context.Context, client *http.Client, dur time.Duration, streams int, onTick func(float64)) (float64, error) {
+func runDownloadEndpoint(ctx context.Context, client *http.Client, ep speedEndpoint, dur time.Duration, streams int, onTick func(float64)) (float64, error) {
 	pCtx, cancel := context.WithTimeout(ctx, dur)
 	defer cancel()
 
 	var totalBytes atomic.Int64
 	var firstErr atomic.Value
+	var aborted atomic.Bool
 	start := time.Now()
 
 	var wg sync.WaitGroup
@@ -149,16 +197,26 @@ func runDownloadPhase(ctx context.Context, client *http.Client, dur time.Duratio
 		go func() {
 			defer wg.Done()
 			buf := make([]byte, 64*1024)
-			for pCtx.Err() == nil {
-				req, err := http.NewRequestWithContext(pCtx, http.MethodGet, cloudflareDownURL, nil)
+			for pCtx.Err() == nil && !aborted.Load() {
+				req, err := http.NewRequestWithContext(pCtx, ep.method, ep.url, nil)
 				if err != nil {
 					return
 				}
+				req.Header.Set("User-Agent", "sweetspot/0.1")
+				req.Header.Set("Cache-Control", "no-store")
 				resp, err := client.Do(req)
 				if err != nil {
 					if pCtx.Err() == nil {
 						firstErr.Store(err)
 					}
+					return
+				}
+				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+					_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+					_ = resp.Body.Close()
+					firstErr.Store(fmt.Errorf("%s returned HTTP %d", ep.name, resp.StatusCode))
+					aborted.Store(true)
+					cancel()
 					return
 				}
 				for {
@@ -190,30 +248,31 @@ loop:
 			break loop
 		case <-ticker.C:
 			elapsed := time.Since(start).Seconds()
-			if elapsed > 0.2 && onTick != nil {
+			if elapsed > 0.2 && totalBytes.Load() > 0 && onTick != nil {
 				onTick(float64(totalBytes.Load()) * 8.0 / (elapsed * 1e6))
 			}
 		}
 	}
 
 	elapsed := time.Since(start).Seconds()
-	var mbps float64
-	if elapsed > 0 {
-		mbps = float64(totalBytes.Load()) * 8.0 / (elapsed * 1e6)
+	bytesRead := totalBytes.Load()
+	if bytesRead == 0 || elapsed <= 0 {
+		if v := firstErr.Load(); v != nil {
+			return 0, v.(error)
+		}
+		return 0, fmt.Errorf("%s transferred 0 bytes", ep.name)
 	}
-	if v := firstErr.Load(); v != nil && mbps == 0 {
-		return 0, v.(error)
-	}
-	return mbps, nil
+	return float64(bytesRead) * 8.0 / (elapsed * 1e6), nil
 }
 
-func runUploadPhase(ctx context.Context, client *http.Client, dur time.Duration, streams int, onTick func(float64)) (float64, error) {
+func runUploadEndpoint(ctx context.Context, client *http.Client, ep speedEndpoint, dur time.Duration, streams int, onTick func(float64)) (float64, error) {
 	pCtx, cancel := context.WithTimeout(ctx, dur)
 	defer cancel()
 
 	chunk := bytes.Repeat([]byte("S"), 2*1024*1024)
 	var totalBytes atomic.Int64
 	var firstErr atomic.Value
+	var aborted atomic.Bool
 	start := time.Now()
 
 	var wg sync.WaitGroup
@@ -221,12 +280,13 @@ func runUploadPhase(ctx context.Context, client *http.Client, dur time.Duration,
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for pCtx.Err() == nil {
+			for pCtx.Err() == nil && !aborted.Load() {
 				pr := &countingReader{r: bytes.NewReader(chunk), counter: &totalBytes}
-				req, err := http.NewRequestWithContext(pCtx, http.MethodPost, cloudflareUpURL, pr)
+				req, err := http.NewRequestWithContext(pCtx, ep.method, ep.url, pr)
 				if err != nil {
 					return
 				}
+				req.Header.Set("User-Agent", "sweetspot/0.1")
 				req.ContentLength = int64(len(chunk))
 				resp, err := client.Do(req)
 				if err != nil {
@@ -235,8 +295,14 @@ func runUploadPhase(ctx context.Context, client *http.Client, dur time.Duration,
 					}
 					return
 				}
-				_, _ = io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 				_ = resp.Body.Close()
+				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+					firstErr.Store(fmt.Errorf("%s returned HTTP %d", ep.name, resp.StatusCode))
+					aborted.Store(true)
+					cancel()
+					return
+				}
 			}
 		}()
 	}
@@ -256,21 +322,26 @@ loop:
 			break loop
 		case <-ticker.C:
 			elapsed := time.Since(start).Seconds()
-			if elapsed > 0.2 && onTick != nil {
+			if elapsed > 0.2 && totalBytes.Load() > 0 && onTick != nil {
 				onTick(float64(totalBytes.Load()) * 8.0 / (elapsed * 1e6))
 			}
 		}
 	}
 
 	elapsed := time.Since(start).Seconds()
-	var mbps float64
-	if elapsed > 0 {
-		mbps = float64(totalBytes.Load()) * 8.0 / (elapsed * 1e6)
+	bytesSent := totalBytes.Load()
+	if aborted.Load() && bytesSent <= int64(len(chunk)*streams) {
+		if v := firstErr.Load(); v != nil {
+			return 0, v.(error)
+		}
 	}
-	if v := firstErr.Load(); v != nil && mbps == 0 {
-		return 0, v.(error)
+	if bytesSent == 0 || elapsed <= 0 {
+		if v := firstErr.Load(); v != nil {
+			return 0, v.(error)
+		}
+		return 0, fmt.Errorf("%s uploaded 0 bytes", ep.name)
 	}
-	return mbps, nil
+	return float64(bytesSent) * 8.0 / (elapsed * 1e6), nil
 }
 
 type countingReader struct {
@@ -307,13 +378,11 @@ func RunMacOSNetworkQuality(ctx context.Context) SpeedResult {
 	}
 
 	var parsed struct {
-		DLThroughput     float64 `json:"dl_throughput"`
-		ULThroughput     float64 `json:"ul_throughput"`
-		Responsiveness   float64 `json:"responsiveness"`
-		BaseRTT          float64 `json:"base_rtt"`
-		TestEndpoint     string  `json:"test_endpoint"`
-		ILH2             float64 `json:"il_h2_req_resp"`
-		LoadedRPM        float64 `json:"dl_responsiveness"`
+		DLThroughput   float64 `json:"dl_throughput"`
+		ULThroughput   float64 `json:"ul_throughput"`
+		Responsiveness float64 `json:"responsiveness"`
+		BaseRTT        float64 `json:"base_rtt"`
+		TestEndpoint   string  `json:"test_endpoint"`
 	}
 	if err := json.Unmarshal(out, &parsed); err != nil {
 		res.Err = err.Error()

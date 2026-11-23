@@ -379,8 +379,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "b":
 		if !m.speedRunning {
 			return m, tea.Batch(
-				m.setToast("Running 8s Cloudflare download + upload + bufferbloat burst..."),
-				m.triggerSpeedBurstCmd(5*time.Second, 3*time.Second, "cloudflare"),
+				m.setToast("Running 8s download + upload + bufferbloat burst..."),
+				m.triggerSpeedBurstCmd(5*time.Second, 3*time.Second, "burst"),
 			)
 		}
 	case "c":
@@ -473,7 +473,7 @@ func (m *Model) triggerSpeedBurstCmd(downDur, upDur time.Duration, source string
 			m.ctx,
 			downDur,
 			upDur,
-			4,
+			3,
 			idle,
 			func() float64 { return m.wanRing.Stats().LastMs },
 			func(p probe.SpeedProgress) {
@@ -483,7 +483,9 @@ func (m *Model) triggerSpeedBurstCmd(downDur, upDur time.Duration, source string
 				}
 			},
 		)
-		res.Source = source
+		if source == "continuous" {
+			res.Source = "continuous"
+		}
 		return speedDoneMsg(res)
 	}
 }
