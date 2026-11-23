@@ -1,6 +1,7 @@
 package advisor
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -30,6 +31,33 @@ func (s Severity) String() string {
 	default:
 		return "GOOD"
 	}
+}
+
+func (s Severity) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+func (s *Severity) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		switch strings.ToUpper(str) {
+		case "CRITICAL":
+			*s = SeverityCritical
+		case "HIGH":
+			*s = SeverityHigh
+		case "TIP":
+			*s = SeverityTip
+		default:
+			*s = SeverityGood
+		}
+		return nil
+	}
+	var num int
+	if err := json.Unmarshal(data, &num); err != nil {
+		return err
+	}
+	*s = Severity(num)
+	return nil
 }
 
 // Advice represents one actionable, evidence-backed recommendation.

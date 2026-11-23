@@ -136,7 +136,7 @@ func NewModel(opts Options) *Model {
 		wanRing:        probe.NewPingRing(opts.WANTarget, 220, 80.0),
 		continuousMode: opts.ContinuousSpeed,
 		progressCh:     make(chan probe.SpeedProgress, 16),
-		spotsStore:     spots.NewStore(),
+		spotsStore:     spots.OpenStore(spots.DefaultPath()),
 	}
 
 	if opts.InitialModemText != "" {

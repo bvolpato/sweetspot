@@ -52,11 +52,30 @@ Start directly in continuous walk-around speed mode:
 sweetspot --continuous
 ```
 
-Run a non-interactive snapshot or JSON export:
+## CLI and AI Agent Workflows
+
+`sweetspot` provides structured subcommands for shell scripts and AI coding agents. Every subcommand supports `--json` (with string severity values such as `"CRITICAL"`, `"HIGH"`, `"TIP"`, and `"GOOD"`) and clean exit codes (`0` success, `1` runtime error, `2` invalid arguments, `3` score below `--fail-below`). When stdout is not a TTY, bare `sweetspot` automatically falls back to a non-interactive diagnostic snapshot instead of failing.
+
+| Command | Purpose |
+|---|---|
+| `sweetspot status --json` | Instant (<100 ms) RF link snapshot with zero active probes |
+| `sweetspot diagnose --speed --scan --out before.json --json` | Sequential diagnostic (never overlaps idle ping with speed or RF scan) plus full Advisor and Playbook |
+| `sweetspot scan --json` | On-demand 2.4 GHz, 5 GHz, and 6 GHz channel congestion scan with recommended clean channels |
+| `sweetspot ping --count 20 --json` | Dual-hop idle ICMP latency, p95, jitter, and loss for router gateway and WAN |
+| `sweetspot speed --json` | Multi-CDN download, upload, and loaded bufferbloat (RPM) test (add `--network-quality` on macOS) |
+| `sweetspot dns --json` | Race System DNS against `1.1.1.1`, `9.9.9.9`, `8.8.8.8`, and your local router |
+| `sweetspot modem <file\|-> --json` | Parse DOCSIS 3.0/3.1 cable modem status from a file, stdin, or `--clipboard` |
+| `sweetspot spot pin "Desk" --speed` | Save a named spot to the persistent store (`~/.local/share/sweetspot/spots.json`), shared with the TUI |
+| `sweetspot spot best --json` | Return the top-ranked pinned spot (also supports `list`, `rm`, and `clear`) |
+| `sweetspot diff before.json after.json --format markdown` | Generate a Before vs. After comparison table from two diagnostic snapshots |
+
+Example before-and-after tuning workflow for an agent:
 
 ```sh
-sweetspot --once --speed --scan
-sweetspot --json --modem cable-stats.txt
+sweetspot diagnose --speed --scan --out before.json --json
+# Apply router or channel changes, then re-measure:
+sweetspot diagnose --speed --out after.json --json
+sweetspot diff before.json after.json --format markdown
 ```
 
 ## Running with `sudo` (Optional)
