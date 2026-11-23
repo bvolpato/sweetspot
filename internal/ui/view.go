@@ -14,8 +14,12 @@ import (
 
 func (m *Model) View() string {
 	w := m.width
-	if w < 72 {
-		w = 72
+	if w < 76 {
+		w = 76
+	}
+	h := m.height
+	if h < 26 {
+		h = 26
 	}
 
 	var sections []string
@@ -26,7 +30,7 @@ func (m *Model) View() string {
 	} else {
 		switch m.tab {
 		case TabRadar:
-			sections = append(sections, m.renderRadarView(w))
+			sections = append(sections, m.renderRadarView(w, h))
 		case TabSpots:
 			sections = append(sections, m.renderSpotsView(w))
 		case TabSpectrum:
@@ -59,7 +63,11 @@ func (m *Model) renderHeader(w int) string {
 	}
 
 	scoreCol := ColorForScore(m.score.Total)
-	scorePill := Badge(fmt.Sprintf("%d/100 · %s", m.score.Total, m.score.Grade), scoreCol)
+	scoreLabel := fmt.Sprintf("%d/100 · %s", m.score.Total, m.score.Grade)
+	if m.speed.DownloadMbps == 0 && !m.speedRunning {
+		scoreLabel = fmt.Sprintf("~%d/100 · %s", m.score.Total, m.score.Grade)
+	}
+	scorePill := Badge(scoreLabel, scoreCol)
 
 	tabs := []struct {
 		id    Tab
@@ -91,7 +99,7 @@ func (m *Model) renderHeader(w int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, row1, row2, " "+divider)
 }
 
-func (m *Model) renderRadarView(w int) string {
+func (m *Model) renderRadarView(w, h int) string {
 	twoCol := w >= 104
 	cardW := w - 2
 	leftW := cardW
@@ -101,10 +109,26 @@ func (m *Model) renderRadarView(w int) string {
 		rightW = cardW - 1 - leftW
 	}
 
-	signalCard := m.renderSignalCard(leftW)
-	speedCard := m.renderSpeedCard(rightW)
-	gwCard := m.renderLatencyCard("Router Hop", m.gwStats, 10, 35, leftW)
-	wanCard := m.renderLatencyCard("Internet ("+m.opts.WANTarget+")", m.wanStats, 25, 70, rightW)
+	// Dynamically size Braille charts so the dashboard fills the terminal cleanly.
+	// Fixed chrome: header (3) + footer (2) + advisor card (5) + borders/headers inside 2 stacked rows (12) = ~22 rows.
+	availCharts := h - 24
+	if !twoCol {
+		availCharts = 6
+	}
+	topChartH := 4
+	latChartH := 4
+	if availCharts > 8 {
+		topChartH = min(4+(availCharts-8)/2, 8)
+		latChartH = min(4+(availCharts-8)-(topChartH-4), 8)
+	}
+
+	topCardH := 8 + topChartH
+	latCardH := 4 + latChartH
+
+	signalCard := m.renderSignalCard(leftW, topCardH, topChartH)
+	speedCard := m.renderSpeedCard(rightW, topCardH, topChartH)
+	gwCard := m.renderLatencyCard("Router Hop", m.gwStats, 10, 35, leftW, latCardH, latChartH)
+	wanCard := m.renderLatencyCard("Internet ("+m.opts.WANTarget+")", m.wanStats, 25, 70, rightW, latCardH, latChartH)
 	advisorStrip := m.renderQuickAdvisorCard(cardW)
 
 	if twoCol {
@@ -115,65 +139,84 @@ func (m *Model) renderRadarView(w int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, signalCard, speedCard, gwCard, wanCard, advisorStrip)
 }
 
-func (m *Model) renderSignalCard(w int) string {
+func (m *Model) renderSignalCard(w, cardH, chartH int) string {
 	inner := w - 4
-	header := CardHeader("◉", "SIGNAL & SWEETSPOT SCORE", m.link.QualityLabel(), inner)
+	header := CardHeader("◉", "SIGNAL RADAR & SWEETSPOT", m.link.QualityLabel(), inner)
 
-	scoreCol := ColorForScore(m.score.Total)
-	scoreBig := lipgloss.NewStyle().Bold(true).Foreground(scoreCol).Render(
-		fmt.Sprintf("%d", m.score.Total),
-	) + StyleMuted.Render("/100 ") + Badge(m.score.Grade, scoreCol)
+	tower := RenderSignalTower(m.link.RSSI, m.link.Connected, m.link.IsEthernet)
 
 	rssiCol := ColorForRSSI(m.link.RSSI)
-	rssiStr := lipgloss.NewStyle().Bold(true).Foreground(rssiCol).Render(fmt.Sprintf("%d dBm", m.link.RSSI))
+	var bigRSSI string
 	if m.link.IsEthernet {
-		rssiStr = lipgloss.NewStyle().Bold(true).Foreground(ColEmerald).Render("Wired Ethernet")
+		bigRSSI = RenderBigNumber("100", ColEmerald)
+	} else if m.link.Connected {
+		bigRSSI = RenderBigNumber(fmt.Sprintf("%d", m.link.RSSI), rssiCol)
+	} else {
+		bigRSSI = RenderBigNumber("0", ColCoral)
 	}
+
+	unitCol := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Foreground(rssiCol).Render("dBm"),
+		StyleSubtitle.Render(fmt.Sprintf("SNR %d dB", m.link.SNR)),
+		StyleMuted.Render(fmt.Sprintf("Noise %d", m.link.Noise)),
+	)
+	if m.link.IsEthernet {
+		unitCol = lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.NewStyle().Bold(true).Foreground(ColEmerald).Render("ETH"),
+			StyleSubtitle.Render("Wired Link"),
+			StyleMuted.Render("No RF loss"),
+		)
+	}
+
+	scoreCol := ColorForScore(m.score.Total)
+	bigScore := RenderBigNumber(fmt.Sprintf("%d", m.score.Total), scoreCol)
+	scoreMeta := lipgloss.JoinVertical(lipgloss.Left,
+		Badge(m.score.Grade, scoreCol),
+		StyleSubtitle.Render(fmt.Sprintf("RF %d · Lat %d", m.score.SignalScore, m.score.LatScore)),
+		StyleMuted.Render(fmt.Sprintf("Spd %d/30", m.score.SpeedScore)),
+	)
+
+	sep := lipgloss.NewStyle().Foreground(ColBorder).Render("  │  \n  │  \n  │  ")
+	heroLeft := lipgloss.JoinHorizontal(lipgloss.Bottom, tower, "  ", bigRSSI, " ", unitCol)
+	heroRight := lipgloss.JoinHorizontal(lipgloss.Bottom, bigScore, " ", scoreMeta)
+	hero := lipgloss.JoinHorizontal(lipgloss.Bottom, heroLeft, sep, heroRight)
 
 	barFrac := (float64(m.link.RSSI) + 90.0) / 55.0
 	if m.link.IsEthernet {
 		barFrac = 1.0
 	}
-	meter := RenderGradientBar(barFrac, max(inner-20, 14))
+	meter := RenderGradientBar(barFrac, max(inner-2, 16))
 
-	meta := fmt.Sprintf("SNR %s  ·  Noise %s  ·  PHY %s",
-		lipgloss.NewStyle().Bold(true).Foreground(ColTeal).Render(fmt.Sprintf("%d dB", m.link.SNR)),
-		StyleValue.Render(fmt.Sprintf("%d dBm", m.link.Noise)),
+	radio := fmt.Sprintf("PHY %s  ·  %s  ·  %s  ·  Errs %d/%d",
 		lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(fmt.Sprintf("%.0f Mbps", m.link.TxRateMbps)),
-	)
-	radio := fmt.Sprintf("%s  ·  %s  ·  Errs %d/%d",
 		StyleValue.Render(m.link.PHYMode),
 		StyleSubtitle.Render(m.link.Security),
 		m.link.InErrors, m.link.OutErrors,
 	)
 
-	spark := RenderSparkline(m.rssiHist, max(inner-12, 16), -85, -30, true, func(v float64) lipgloss.Color {
+	rssiChart := BrailleChart(m.rssiHist, inner, chartH, -85, -35, true, "dBm", func(v float64) lipgloss.Color {
 		return ColorForRSSI(int(v))
 	})
 
-	breakdown := StyleMuted.Render(truncate(fmt.Sprintf("RF %d/35 · Lat %d/35 · Spd %d/30 · %s",
-		m.score.SignalScore, m.score.LatScore, m.score.SpeedScore, m.score.Summary), inner))
-
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
-		fmt.Sprintf("%s  %s %s", scoreBig, rssiStr, meter),
-		meta,
+		hero,
+		meter,
 		radio,
-		StyleMuted.Render("RSSI trend ") + spark,
-		breakdown,
+		rssiChart,
 	)
-	return StyleCardHi.Width(w - 2).Height(6).Render(body)
+	return StyleCardHi.Width(w - 2).Height(cardH).Render(body)
 }
 
-func (m *Model) renderSpeedCard(w int) string {
+func (m *Model) renderSpeedCard(w, cardH, chartH int) string {
 	inner := w - 4
-	right := "[b] burst · [c] cont"
+	right := "[b] burst · [c] cont · [n] netQuality"
 	if m.speedRunning {
-		right = m.spinner.View() + " " + m.speedProgress.Phase
+		right = m.spinner.View() + " running " + m.speedProgress.Phase
 	} else if m.speed.Source != "" {
 		right = m.speed.Source + " · " + m.speed.Timestamp.Format("15:04:05")
 	}
-	header := CardHeader("⚡", "THROUGHPUT & BLOAT", right, inner)
+	header := CardHeader("⚡", "THROUGHPUT & BUFFERBLOAT", right, inner)
 
 	dl := m.speed.DownloadMbps
 	ul := m.speed.UploadMbps
@@ -187,49 +230,93 @@ func (m *Model) renderSpeedCard(w int) string {
 	}
 
 	barW := max(inner-24, 10)
-	dlRow := fmt.Sprintf("%-7s %s %s",
-		lipgloss.NewStyle().Foreground(ColCyan).Bold(true).Render("↓ DOWN"),
-		RenderBar(math.Min(dl/800.0, 1.0), barW, ColCyan),
-		StyleValue.Render(fmt.Sprintf("%10s", FormatMbps(dl))),
-	)
-	ulRow := fmt.Sprintf("%-7s %s %s",
-		lipgloss.NewStyle().Foreground(ColViolet).Bold(true).Render("↑ UP"),
-		RenderBar(math.Min(ul/150.0, 1.0), barW, ColViolet),
-		StyleValue.Render(fmt.Sprintf("%10s", FormatMbps(ul))),
-	)
+	dlLabel := lipgloss.NewStyle().Foreground(ColCyan).Bold(true).Width(8).Render("↓ DOWN")
+	ulLabel := lipgloss.NewStyle().Foreground(ColViolet).Bold(true).Width(8).Render("↑ UP")
+	var dlRow, ulRow, bloatBlock string
 
-	liveRow := StyleMuted.Render(truncate(fmt.Sprintf("Live %s: ↓ %s  ↑ %s",
-		m.link.Interface, FormatMbps(m.link.LiveRxMbps), FormatMbps(m.link.LiveTxMbps)), inner))
-
-	bloatText := StyleMuted.Render(truncate("Bufferbloat: press [b] burst or [n] netQuality", inner))
-	if m.speed.LoadedRTTMs > 0 || m.speed.RPM > 0 {
-		rpmCol := ColEmerald
-		if m.speed.RPM < 400 {
-			rpmCol = ColCoral
-		} else if m.speed.RPM < 800 {
-			rpmCol = ColAmber
-		}
-		bloatText = fmt.Sprintf("Loaded: %s (%s, bloat %s)",
-			lipgloss.NewStyle().Bold(true).Foreground(rpmCol).Render(fmt.Sprintf("%d RPM", m.speed.RPM)),
-			StyleValue.Render(fmt.Sprintf("%.0f ms", m.speed.LoadedRTTMs)),
-			lipgloss.NewStyle().Foreground(rpmCol).Render(fmt.Sprintf("+%.0f ms", m.speed.BloatDeltaMs)),
+	if dl == 0 && ul == 0 && !m.speedRunning {
+		ctaDown := lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render("press [b] to measure") +
+			StyleMuted.Render("  (or [c] continuous)")
+		ctaUp := lipgloss.NewStyle().Bold(true).Foreground(ColViolet).Render("press [b] to measure") +
+			StyleMuted.Render("  (or [n] netQuality)")
+		dlRow = dlLabel + " " + ctaDown
+		ulRow = ulLabel + " " + ctaUp
+		bloatBlock = lipgloss.JoinVertical(lipgloss.Left,
+			fmt.Sprintf("%s  %s",
+				Badge("NOT TESTED", ColTrackHi),
+				StyleSubtitle.Render("Live "+m.link.Interface+" traffic charted below (zero extra bandwidth)"),
+			),
+			fmt.Sprintf("Live %s: %s  ·  %s",
+				StyleMuted.Render(m.link.Interface),
+				lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render("↓ "+FormatMbps(m.link.LiveRxMbps)),
+				lipgloss.NewStyle().Bold(true).Foreground(ColViolet).Render("↑ "+FormatMbps(m.link.LiveTxMbps)),
+			),
 		)
+	} else {
+		dlRow = fmt.Sprintf("%s %s %s",
+			dlLabel,
+			RenderBar(math.Min(dl/800.0, 1.0), barW, ColCyan),
+			StyleValue.Render(fmt.Sprintf("%10s", FormatMbps(dl))),
+		)
+		ulRow = fmt.Sprintf("%s %s %s",
+			ulLabel,
+			RenderBar(math.Min(ul/150.0, 1.0), barW, ColViolet),
+			StyleValue.Render(fmt.Sprintf("%10s", FormatMbps(ul))),
+		)
+
+		bloatLine := StyleMuted.Render("Bufferbloat: sampling loaded latency...")
+		if m.speed.LoadedRTTMs > 0 || m.speed.RPM > 0 {
+			rpmCol := ColEmerald
+			grade := "LOW BLOAT"
+			if m.speed.RPM < 400 {
+				rpmCol = ColCoral
+				grade = "HIGH BLOAT"
+			} else if m.speed.RPM < 800 {
+				rpmCol = ColAmber
+				grade = "MED BLOAT"
+			}
+			bloatLine = fmt.Sprintf("%s  Loaded %s  (%s · %s bloat)",
+				Badge(grade, rpmCol),
+				lipgloss.NewStyle().Bold(true).Foreground(rpmCol).Render(fmt.Sprintf("%d RPM", m.speed.RPM)),
+				StyleValue.Render(fmt.Sprintf("%.0f ms", m.speed.LoadedRTTMs)),
+				lipgloss.NewStyle().Foreground(rpmCol).Render(fmt.Sprintf("+%.0f ms", m.speed.BloatDeltaMs)),
+			)
+		}
+		liveLine := fmt.Sprintf("Live %s: %s  ·  %s",
+			StyleMuted.Render(m.link.Interface),
+			lipgloss.NewStyle().Foreground(ColCyan).Render("↓ "+FormatMbps(m.link.LiveRxMbps)),
+			lipgloss.NewStyle().Foreground(ColViolet).Render("↑ "+FormatMbps(m.link.LiveTxMbps)),
+		)
+		bloatBlock = lipgloss.JoinVertical(lipgloss.Left, bloatLine, liveLine)
 	}
 
-	spark := RenderSparkline(m.downHist, max(inner-12, 16), 0, 0, false, func(float64) lipgloss.Color { return ColCyan })
+	chartTitle := StyleMuted.Render("Live RX Throughput (Mbps)")
+	if m.speedRunning || m.speed.DownloadMbps > 0 {
+		chartTitle = StyleMuted.Render("Throughput History (Mbps)")
+	}
+	speedChart := BrailleChart(m.downHist, inner, chartH, 0, 0, false, "M", func(v float64) lipgloss.Color {
+		if v >= 250 {
+			return ColEmerald
+		}
+		if v >= 60 {
+			return ColCyan
+		}
+		return ColViolet
+	})
 
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		header,
+		"",
 		dlRow,
 		ulRow,
-		bloatText,
-		StyleMuted.Render("Down trend ") + spark,
-		liveRow,
+		bloatBlock,
+		chartTitle,
+		speedChart,
 	)
-	return StyleCard.Width(w - 2).Height(6).Render(body)
+	return StyleCard.Width(w - 2).Height(cardH).Render(body)
 }
 
-func (m *Model) renderLatencyCard(title string, st probe.PingStats, goodMax, warnMax float64, w int) string {
+func (m *Model) renderLatencyCard(title string, st probe.PingStats, goodMax, warnMax float64, w, cardH, chartH int) string {
 	inner := w - 4
 	right := st.Target
 	if right == "" {
@@ -237,7 +324,7 @@ func (m *Model) renderLatencyCard(title string, st probe.PingStats, goodMax, war
 	}
 	header := CardHeader("∿", strings.ToUpper(title), right, inner)
 
-	spark := RenderSparkline(st.History, max(inner-2, 16), 0, 0, false, func(v float64) lipgloss.Color {
+	chart := BrailleChart(st.History, inner, chartH, 0, 0, false, "ms", func(v float64) lipgloss.Color {
 		return ColorForLatency(v, goodMax, warnMax)
 	})
 
@@ -260,8 +347,8 @@ func (m *Model) renderLatencyCard(title string, st probe.PingStats, goodMax, war
 		st.Sent,
 	)
 
-	body := lipgloss.JoinVertical(lipgloss.Left, header, spark, stats1, StyleMuted.Render(stats2))
-	return StyleCard.Width(w - 2).Render(body)
+	body := lipgloss.JoinVertical(lipgloss.Left, header, chart, stats1, StyleMuted.Render(stats2))
+	return StyleCard.Width(w - 2).Height(cardH).Render(body)
 }
 
 func (m *Model) renderQuickAdvisorCard(w int) string {
@@ -356,7 +443,6 @@ func (m *Model) renderSpotsView(w int) string {
 func (m *Model) renderSpectrumView(w int) string {
 	inner := w - 4
 
-	// Card 1: RF Channel Congestion
 	rfRight := "Press [s] to scan nearby channels"
 	if m.scanning {
 		rfRight = m.spinner.View() + " scanning..."
@@ -411,7 +497,6 @@ func (m *Model) renderSpectrumView(w int) string {
 	}
 	rfCard := StyleCard.Width(w - 2).Render(lipgloss.JoinVertical(lipgloss.Left, rfLines...))
 
-	// Card 2: DNS Resolver Race
 	dnsRight := "Press [r] to re-race"
 	if m.dnsRunning {
 		dnsRight = m.spinner.View() + " racing..."
@@ -498,11 +583,26 @@ func (m *Model) renderPinModal(w int) string {
 }
 
 func (m *Model) renderFooter(w int) string {
-	keys := "[1-4] Views  [Space] Pin  [b] Burst  [c] Cont  [n] netQuality  [s] Scan  [r] DNS  [m] Modem  [e] Export  [q] Quit"
-	if m.toast != "" {
-		return StyleFooter.Width(w).Render(StyleToast.Render("● "+m.toast) + "\n" + keys)
+	key := func(k, label string) string {
+		return lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Background(ColTrack).Render(" "+k+" ") +
+			StyleMuted.Render(" "+label)
 	}
-	return StyleFooter.Width(w).Render(keys)
+	bar := strings.Join([]string{
+		key("1-4", "Views"),
+		key("Space", "Pin"),
+		key("b", "Speed Burst"),
+		key("c", "Continuous"),
+		key("n", "netQuality"),
+		key("s", "RF Scan"),
+		key("r", "DNS"),
+		key("m", "Modem"),
+		key("e", "Export"),
+		key("q", "Quit"),
+	}, "  ")
+	if m.toast != "" {
+		return StyleFooter.Width(w).Render(StyleToast.Render("● "+m.toast) + "\n" + bar)
+	}
+	return StyleFooter.Width(w).Render(bar)
 }
 
 func severityBadge(s advisor.Severity) string {

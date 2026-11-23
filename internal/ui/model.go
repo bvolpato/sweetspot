@@ -128,8 +128,8 @@ func NewModel(opts Options) *Model {
 		height:         36,
 		spinner:        sp,
 		pinInput:       ti,
-		gwRing:         probe.NewPingRing("", 80, 40.0),
-		wanRing:        probe.NewPingRing(opts.WANTarget, 80, 80.0),
+		gwRing:         probe.NewPingRing("", 220, 40.0),
+		wanRing:        probe.NewPingRing(opts.WANTarget, 220, 80.0),
 		continuousMode: opts.ContinuousSpeed,
 		progressCh:     make(chan probe.SpeedProgress, 16),
 		spotsStore:     spots.NewStore(),
@@ -206,12 +206,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if next.Connected {
-			m.rssiHist = appendRing(m.rssiHist, float64(next.RSSI), 64)
-			m.snrHist = appendRing(m.snrHist, float64(next.SNR), 64)
+			m.rssiHist = appendRing(m.rssiHist, float64(next.RSSI), 220)
+			m.snrHist = appendRing(m.snrHist, float64(next.SNR), 220)
 		}
 		if !m.speedRunning {
-			m.downHist = appendRing(m.downHist, next.LiveRxMbps, 64)
-			m.upHist = appendRing(m.upHist, next.LiveTxMbps, 64)
+			m.downHist = appendRing(m.downHist, next.LiveRxMbps, 220)
+			m.upHist = appendRing(m.upHist, next.LiveTxMbps, 220)
 		}
 		m.gwStats = m.gwRing.Stats()
 		m.wanStats = m.wanRing.Stats()

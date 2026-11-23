@@ -66,8 +66,10 @@ func ComputeScore(link wifi.LinkInfo, gw probe.PingStats, wan probe.PingStats, s
 	}
 
 	// 3. Speed & bufferbloat (0-30)
-	// Before an active speed burst runs, estimate conservatively from PHY rate so the score stays useful.
+	// Before an active speed burst runs, normalize the measured RF + Latency components (70 pts)
+	// so a strong, low-jitter spot is not penalized before pressing [b].
 	spd := 0.0
+	var total int
 	if speed.DownloadMbps > 0 {
 		// Downlink: log curve; 500+ Mbps -> 15 pts, 100 Mbps -> ~10.5 pts, 25 Mbps -> ~6 pts
 		dlPts := clamp(math.Log10(math.Max(speed.DownloadMbps, 1))/math.Log10(500.0), 0, 1) * 15.0
@@ -81,15 +83,15 @@ func ComputeScore(link wifi.LinkInfo, gw probe.PingStats, wan probe.PingStats, s
 			bloatPts = clamp((250.0-speed.BloatDeltaMs)/225.0, 0, 1) * 8.0
 		}
 		spd = dlPts + ulPts + bloatPts
+		total = int(math.Round(sig + lat + spd))
 	} else {
 		est := link.TxRateMbps * 0.55
 		if link.IsEthernet {
 			est = 500
 		}
-		spd = clamp(est/500.0, 0, 1) * 24.0
+		spd = clamp(est/400.0, 0, 1) * 30.0
+		total = int(math.Round((sig+lat)/70.0*85.0 + (spd/30.0)*15.0))
 	}
-
-	total := int(math.Round(sig + lat + spd))
 	if total > 100 {
 		total = 100
 	}

@@ -22,7 +22,8 @@ var (
 	ColText     = lipgloss.Color("#F1F5F9")
 	ColSubtle   = lipgloss.Color("#94A3B8")
 	ColMuted    = lipgloss.Color("#64748B")
-	ColTrack    = lipgloss.Color("#1E293B")
+	ColTrack    = lipgloss.Color("#293548")
+	ColTrackHi  = lipgloss.Color("#475569")
 )
 
 var (
@@ -144,7 +145,7 @@ func RenderBar(fraction float64, width int, fillColor lipgloss.Color) string {
 	}
 	empty := width - filled
 	f := lipgloss.NewStyle().Foreground(fillColor).Render(strings.Repeat("━", filled))
-	e := lipgloss.NewStyle().Foreground(ColTrack).Render(strings.Repeat("━", empty))
+	e := lipgloss.NewStyle().Foreground(ColTrackHi).Render(strings.Repeat("─", empty))
 	return f + e
 }
 
@@ -172,7 +173,7 @@ func RenderGradientBar(fraction float64, width int) string {
 			}
 			b.WriteString(lipgloss.NewStyle().Foreground(stops[idx]).Render("█"))
 		} else {
-			b.WriteString(lipgloss.NewStyle().Foreground(ColTrack).Render("░"))
+			b.WriteString(lipgloss.NewStyle().Foreground(ColTrackHi).Render("░"))
 		}
 	}
 	return b.String()
