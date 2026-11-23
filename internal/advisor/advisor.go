@@ -165,6 +165,36 @@ func Diagnose(
 		}
 	}
 
+	// 3.5. Channel Airtime Utilization (CCA %) & Spatial Streams (NSS) when available
+	if !link.IsEthernet && link.HasCCA {
+		if link.CCAPct >= 65 {
+			out = append(out, Advice{
+				Severity: SeverityCritical,
+				Category: "Airtime / CCA",
+				Title:    fmt.Sprintf("Channel airtime is %d%% busy (heavily saturated)", link.CCAPct),
+				Detail:   "High CCA means other devices or neighboring APs are consuming most of the channel airtime even if your RSSI looks strong.",
+				Action:   "Move to a cleaner channel or 6 GHz band, or switch to wired Ethernet if available.",
+			})
+		} else if link.CCAPct >= 45 {
+			out = append(out, Advice{
+				Severity: SeverityHigh,
+				Category: "Airtime / CCA",
+				Title:    fmt.Sprintf("Elevated channel airtime utilization (%d%% CCA)", link.CCAPct),
+				Detail:   "Noticeable co-channel contention; expect jitter spikes when nearby devices transmit.",
+				Action:   "Run [s] RF Scan to find a less crowded channel block.",
+			})
+		}
+	}
+	if !link.IsEthernet && link.NSS == 1 && link.Band != wifi.Band2GHz {
+		out = append(out, Advice{
+			Severity: SeverityTip,
+			Category: "MIMO / Streams",
+			Title:    "Connected on 1x1 spatial stream (half of 2x2 MIMO rate)",
+			Detail:   "Interference, multipath reflections, or AP limits dropped this link from 2 spatial streams to 1.",
+			Action:   "Shift position slightly or face the AP to see if NSS recovers to 2x2.",
+		})
+	}
+
 	// 4. Packet loss & Wi-Fi hop jitter
 	if gw.Received >= 5 {
 		if gw.LossPct >= 1.0 {

@@ -88,7 +88,14 @@ func (m *Model) renderHeader(w int) string {
 	}
 
 	topLeft := logo + "  " + chanBadge
-	topRight := statusPill + " " + scorePill
+	if m.link.SSID != "" {
+		topLeft += " " + StyleMuted.Render(m.link.SSID)
+	}
+	sudoBadge := ""
+	if m.link.Privileged {
+		sudoBadge = Badge("SUDO+", ColViolet) + " "
+	}
+	topRight := sudoBadge + statusPill + " " + scorePill
 	gap := w - lipgloss.Width(topLeft) - lipgloss.Width(topRight) - 2
 	if gap < 1 {
 		gap = 1
@@ -187,12 +194,46 @@ func (m *Model) renderSignalCard(w, cardH, chartH int) string {
 	}
 	meter := RenderGradientBar(barFrac, max(inner-2, 16))
 
-	radio := fmt.Sprintf("PHY %s  ·  %s  ·  %s  ·  Errs %d/%d",
-		lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(fmt.Sprintf("%.0f Mbps", m.link.TxRateMbps)),
+	extra := []string{
+		fmt.Sprintf("PHY %s", lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(fmt.Sprintf("%.0f Mbps", m.link.TxRateMbps))),
 		StyleValue.Render(m.link.PHYMode),
-		StyleSubtitle.Render(m.link.Security),
-		m.link.InErrors, m.link.OutErrors,
-	)
+	}
+	if m.link.EffDownMbps > 0 {
+		extra = append(extra, StyleSubtitle.Render(fmt.Sprintf("Eff %.0f Mbps", m.link.EffDownMbps)))
+	}
+	if m.link.LinkQuality > 0 {
+		extra = append(extra, StyleSubtitle.Render(fmt.Sprintf("LQM %d", m.link.LinkQuality)))
+	}
+	if m.link.HasCCA {
+		ccaCol := ColEmerald
+		if m.link.CCAPct >= 65 {
+			ccaCol = ColCoral
+		} else if m.link.CCAPct >= 45 {
+			ccaCol = ColAmber
+		}
+		extra = append(extra, lipgloss.NewStyle().Bold(true).Foreground(ccaCol).Render(fmt.Sprintf("CCA %d%%", m.link.CCAPct)))
+	}
+	if m.link.HasMCS {
+		mcsStr := fmt.Sprintf("MCS %d", m.link.MCS)
+		if m.link.NSS > 0 {
+			mcsStr += fmt.Sprintf(" %dx%d", m.link.NSS, m.link.NSS)
+		}
+		extra = append(extra, StyleSubtitle.Render(mcsStr))
+	}
+	if m.link.BSSID != "" {
+		bssidStr := m.link.BSSID
+		if m.roamCount > 0 {
+			bssidStr += fmt.Sprintf(" (%d roams)", m.roamCount)
+		}
+		extra = append(extra, StyleMuted.Render(bssidStr))
+	} else if m.link.Scheduler != "" {
+		q := m.link.Scheduler
+		if m.link.QoSMode != "" {
+			q += "/" + m.link.QoSMode
+		}
+		extra = append(extra, StyleMuted.Render(q))
+	}
+	radio := strings.Join(extra, " · ")
 
 	rssiChart := BrailleChart(m.rssiHist, inner, chartH, -85, -35, true, "dBm", func(v float64) lipgloss.Color {
 		return ColorForRSSI(int(v))

@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build linux
 
 package wifi
 
@@ -12,11 +12,13 @@ import (
 	"time"
 )
 
-// ReadLink reads Wi-Fi link metrics on Linux via iw and ip route.
+// ReadLink reads Wi-Fi link metrics on Linux via iw, /proc/net/dev, and ip route.
+// When run with root/CAP_NET_ADMIN, iw survey dump also populates CCA channel airtime %.
 func ReadLink(ctx context.Context) (LinkInfo, error) {
 	info := LinkInfo{
-		Timestamp: time.Now(),
-		Band:      BandUnknown,
+		Timestamp:  time.Now(),
+		Band:       BandUnknown,
+		Privileged: os.Geteuid() == 0,
 	}
 
 	iface, gw := readDefaultRouteLinux(ctx)
@@ -32,6 +34,8 @@ func ReadLink(ctx context.Context) (LinkInfo, error) {
 			info.PowerOn = true
 			info.Connected = true
 			parseIwLink(string(out), &info)
+			enrichIwStation(ctx, iface, &info)
+			enrichIwSurvey(ctx, iface, &info)
 		} else if strings.HasPrefix(iface, "en") || strings.HasPrefix(iface, "eth") {
 			info.IsEthernet = true
 		}
@@ -41,7 +45,7 @@ func ReadLink(ctx context.Context) (LinkInfo, error) {
 	return info, nil
 }
 
-// ScanNeighbors scans nearby networks on Linux via iw scan.
+// ScanNeighbors scans nearby networks on Linux via iw scan (or nmcli fallback).
 func ScanNeighbors(ctx context.Context, current LinkInfo) ScanResult {
 	start := time.Now()
 	if current.Interface == "" {
@@ -51,8 +55,11 @@ func ScanNeighbors(ctx context.Context, current LinkInfo) ScanResult {
 	defer cancel()
 	out, err := exec.CommandContext(c, "iw", "dev", current.Interface, "scan").Output()
 	if err != nil {
+		if nm := fallbackNmcliScan(ctx); len(nm) > 0 {
+			return SummarizeScan(nm, current, time.Since(start))
+		}
 		res := SummarizeScan(nil, current, time.Since(start))
-		res.Err = "iw scan failed (may require elevated permissions)"
+		res.Err = "RF scan requires sudo (or NetworkManager nmcli) on Linux"
 		return res
 	}
 	var neighbors []NeighborAP
@@ -65,7 +72,12 @@ func ScanNeighbors(ctx context.Context, current LinkInfo) ScanResult {
 			if cur != nil && cur.Channel > 0 {
 				neighbors = append(neighbors, *cur)
 			}
-			cur = &NeighborAP{WidthMHz: 20}
+			fields := strings.Fields(trim)
+			bssid := ""
+			if len(fields) >= 2 {
+				bssid = strings.Split(fields[1], "(")[0]
+			}
+			cur = &NeighborAP{BSSID: bssid, WidthMHz: 20}
 			continue
 		}
 		if cur == nil {
@@ -84,6 +96,130 @@ func ScanNeighbors(ctx context.Context, current LinkInfo) ScanResult {
 		neighbors = append(neighbors, *cur)
 	}
 	return SummarizeScan(neighbors, current, time.Since(start))
+}
+
+func fallbackNmcliScan(ctx context.Context) []NeighborAP {
+	c, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(c, "nmcli", "-t", "-f", "BSSID,SSID,CHAN,FREQ,SIGNAL,SECURITY", "dev", "wifi", "list").Output()
+	if err != nil {
+		return nil
+	}
+	var outAPs []NeighborAP
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// nmcli escapes ':' in BSSID as '\:'
+		safe := strings.ReplaceAll(line, `\:`, "\x00")
+		parts := strings.Split(safe, ":")
+		if len(parts) < 5 {
+			continue
+		}
+		bssid := strings.ReplaceAll(parts[0], "\x00", ":")
+		ch, _ := strconv.Atoi(parts[2])
+		freqStr := strings.Fields(parts[3])
+		freq := 0
+		if len(freqStr) > 0 {
+			freq, _ = strconv.Atoi(freqStr[0])
+		}
+		sigPct, _ := strconv.Atoi(parts[4])
+		band, _ := freqToBandChannel(freq)
+		if ch > 0 {
+			outAPs = append(outAPs, NeighborAP{
+				BSSID:    bssid,
+				SSID:     parts[1],
+				Channel:  ch,
+				Band:     band,
+				WidthMHz: 20,
+				RSSI:     sigPct/2 - 100,
+			})
+		}
+	}
+	return outAPs
+}
+
+func enrichIwStation(ctx context.Context, iface string, info *LinkInfo) {
+	c, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(c, "iw", "dev", iface, "station", "dump").Output()
+	if err != nil {
+		return
+	}
+	var txPkts, txRetries uint64
+	reMCS := regexp.MustCompile(`(?:HE-MCS|VHT-MCS|EHT-MCS|MCS)\s+(\d+)`)
+	reNSS := regexp.MustCompile(`(?:HE-NSS|VHT-NSS|EHT-NSS)\s+(\d+)`)
+	for _, line := range strings.Split(string(out), "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "tx packets:") {
+			txPkts, _ = strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(trim, "tx packets:")), 10, 64)
+		} else if strings.HasPrefix(trim, "tx retries:") {
+			txRetries, _ = strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(trim, "tx retries:")), 10, 64)
+		} else if strings.HasPrefix(trim, "tx bitrate:") {
+			if m := reMCS.FindStringSubmatch(trim); m != nil {
+				info.MCS, _ = strconv.Atoi(m[1])
+				info.HasMCS = true
+			}
+			if m := reNSS.FindStringSubmatch(trim); m != nil {
+				info.NSS, _ = strconv.Atoi(m[1])
+			}
+		}
+	}
+	if txPkts > 0 {
+		info.TxRetriesPct = float64(txRetries) * 100.0 / float64(txPkts)
+	}
+}
+
+func enrichIwSurvey(ctx context.Context, iface string, info *LinkInfo) {
+	c, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(c, "iw", "dev", iface, "survey", "dump").Output()
+	if err != nil {
+		return
+	}
+	inUse := false
+	var activeMs, busyMs float64
+	for _, line := range strings.Split(string(out), "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "frequency:") {
+			inUse = strings.Contains(trim, "[in use]")
+			activeMs, busyMs = 0, 0
+			continue
+		}
+		if !inUse {
+			continue
+		}
+		if strings.HasPrefix(trim, "noise:") {
+			f := strings.Fields(strings.TrimPrefix(trim, "noise:"))
+			if len(f) > 0 {
+				if n, err := strconv.Atoi(f[0]); err == nil && n < 0 {
+					info.Noise = n
+					if info.RSSI != 0 {
+						info.SNR = info.RSSI - info.Noise
+					}
+				}
+			}
+		} else if strings.HasPrefix(trim, "channel active time:") {
+			f := strings.Fields(strings.TrimPrefix(trim, "channel active time:"))
+			if len(f) > 0 {
+				activeMs, _ = strconv.ParseFloat(f[0], 64)
+			}
+		} else if strings.HasPrefix(trim, "channel busy time:") {
+			f := strings.Fields(strings.TrimPrefix(trim, "channel busy time:"))
+			if len(f) > 0 {
+				busyMs, _ = strconv.ParseFloat(f[0], 64)
+			}
+		}
+		if activeMs > 0 && busyMs >= 0 {
+			pct := int(busyMs * 100.0 / activeMs)
+			if pct > 100 {
+				pct = 100
+			}
+			info.CCAPct = pct
+			info.HasCCA = true
+		}
+	}
 }
 
 func readDefaultRouteLinux(ctx context.Context) (iface, gw string) {
@@ -106,12 +242,17 @@ func readDefaultRouteLinux(ctx context.Context) (iface, gw string) {
 }
 
 func parseIwLink(text string, info *LinkInfo) {
+	reBSSID := regexp.MustCompile(`Connected to ([0-9a-fA-F:]{17})`)
 	reSig := regexp.MustCompile(`signal:\s*(-?\d+)\s*dBm`)
 	reFreq := regexp.MustCompile(`freq:\s*(\d+)`)
 	reTx := regexp.MustCompile(`tx bitrate:\s*([0-9.]+)\s*MBit/s`)
+	reRx := regexp.MustCompile(`rx bitrate:\s*([0-9.]+)\s*MBit/s`)
 	reW := regexp.MustCompile(`(\d+)MHz`)
 	for _, line := range strings.Split(text, "\n") {
 		trim := strings.TrimSpace(line)
+		if m := reBSSID.FindStringSubmatch(trim); m != nil {
+			info.BSSID = m[1]
+		}
 		if strings.HasPrefix(trim, "SSID:") {
 			info.SSID = strings.TrimSpace(strings.TrimPrefix(trim, "SSID:"))
 		}
@@ -123,6 +264,9 @@ func parseIwLink(text string, info *LinkInfo) {
 		if m := reFreq.FindStringSubmatch(trim); m != nil {
 			freq, _ := strconv.Atoi(m[1])
 			info.Band, info.Channel = freqToBandChannel(freq)
+		}
+		if m := reRx.FindStringSubmatch(trim); m != nil {
+			info.RxRateMbps, _ = strconv.ParseFloat(m[1], 64)
 		}
 		if m := reTx.FindStringSubmatch(trim); m != nil {
 			info.TxRateMbps, _ = strconv.ParseFloat(m[1], 64)

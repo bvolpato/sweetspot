@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -20,13 +21,15 @@ import (
 	"time"
 )
 
-// ReadLink reads live Wi-Fi telemetry via CoreWLAN (zero sudo, <1ms, no scan stutter)
-// along with active default route, interface counters, and DNS servers.
+// ReadLink reads live Wi-Fi telemetry via CoreWLAN (zero sudo, <1ms, no scan stutter),
+// enriches it with zero-sudo ifconfig -v link quality/effective rate/QoS fields,
+// and automatically reads wdutil info when running as root (sudo) for BSSID, CCA %, MCS, and NSS.
 func ReadLink(ctx context.Context) (LinkInfo, error) {
 	info := LinkInfo{
-		Timestamp: time.Now(),
-		Interface: "en0",
-		Band:      BandUnknown,
+		Timestamp:  time.Now(),
+		Interface:  "en0",
+		Band:       BandUnknown,
+		Privileged: os.Geteuid() == 0,
 	}
 
 	var cinfo C.ss_wifi_info_t
@@ -69,14 +72,116 @@ func ReadLink(ctx context.Context) (LinkInfo, error) {
 	info.InErrors = inE
 	info.OutErrors = outE
 
+	enrichIfconfigVerbose(ctx, targetIface, &info)
+
+	// When started with sudo, enrich with unredacted BSSID/SSID, CCA %, MCS, NSS, and GI.
+	if info.Privileged && !info.IsEthernet {
+		enrichWdutil(ctx, &info)
+	}
+
 	info.DNSServers = readDNSServers(ctx)
 	info.AirDropActive = checkAirDropActive(ctx)
 
 	return info, nil
 }
 
+var (
+	reLinkQuality = regexp.MustCompile(`link quality:\s*(\d+)`)
+	reScheduler   = regexp.MustCompile(`scheduler:\s*([A-Za-z0-9_-]+)`)
+	reDownEff     = regexp.MustCompile(`downlink rate:\s*([0-9.]+)\s*Mbps`)
+	reUpEff       = regexp.MustCompile(`uplink rate:\s*([0-9.]+)\s*Mbps`)
+	reQoSMode     = regexp.MustCompile(`qosmarking enabled:\s*yes\s+mode:\s*(\S+)`)
+)
+
+func enrichIfconfigVerbose(ctx context.Context, iface string, info *LinkInfo) {
+	if iface == "" {
+		return
+	}
+	c, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(c, "/sbin/ifconfig", "-v", iface).Output()
+	if err != nil {
+		return
+	}
+	text := string(out)
+	if m := reLinkQuality.FindStringSubmatch(text); m != nil {
+		info.LinkQuality, _ = strconv.Atoi(m[1])
+	}
+	if m := reScheduler.FindStringSubmatch(text); m != nil {
+		info.Scheduler = m[1]
+	}
+	if m := reDownEff.FindStringSubmatch(text); m != nil {
+		info.EffDownMbps, _ = strconv.ParseFloat(m[1], 64)
+	}
+	if m := reUpEff.FindStringSubmatch(text); m != nil {
+		info.EffUpMbps, _ = strconv.ParseFloat(m[1], 64)
+	}
+	if m := reQoSMode.FindStringSubmatch(text); m != nil {
+		info.QoSMode = m[1]
+	}
+}
+
+func enrichWdutil(ctx context.Context, info *LinkInfo) {
+	c, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(c, "/usr/bin/wdutil", "info").Output()
+	if err != nil {
+		return
+	}
+	inWiFi := false
+	for _, raw := range strings.Split(string(out), "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "WIFI") {
+			inWiFi = true
+			continue
+		}
+		if inWiFi && (strings.HasPrefix(line, "BLUETOOTH") || strings.HasPrefix(line, "AWDL") || strings.HasPrefix(line, "NETWORK")) {
+			break
+		}
+		if !inWiFi {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if val == "" || val == "None" || strings.Contains(val, "<redacted>") {
+			continue
+		}
+		switch key {
+		case "SSID":
+			info.SSID = val
+		case "BSSID":
+			info.BSSID = val
+		case "MCS Index":
+			if v, err := strconv.Atoi(val); err == nil {
+				info.MCS = v
+				info.HasMCS = true
+			}
+		case "NSS":
+			if v, err := strconv.Atoi(val); err == nil && v > 0 {
+				info.NSS = v
+			}
+		case "Guard Interval":
+			f := strings.Fields(val)
+			if len(f) > 0 {
+				if v, err := strconv.Atoi(f[0]); err == nil {
+					info.GuardInterval = v
+				}
+			}
+		case "CCA":
+			num := strings.TrimSpace(strings.TrimSuffix(val, "%"))
+			if v, err := strconv.Atoi(num); err == nil {
+				info.CCAPct = v
+				info.HasCCA = true
+			}
+		}
+	}
+}
+
 // ScanNeighbors triggers an explicit on-demand RF neighborhood scan.
-// It tries CoreWLAN first and falls back to system_profiler if macOS returns 0 results.
 func ScanNeighbors(ctx context.Context, current LinkInfo) ScanResult {
 	start := time.Now()
 	const maxAPs = 192
@@ -198,7 +303,6 @@ func readIfaceCounters(ctx context.Context, iface string) (inB, outB, inE, outE 
 			continue
 		}
 		fields := strings.Fields(line)
-		// Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
 		if len(fields) >= 10 {
 			inE, _ = strconv.ParseUint(fields[5], 10, 64)
 			inB, _ = strconv.ParseUint(fields[6], 10, 64)
@@ -248,7 +352,6 @@ func checkAirDropActive(ctx context.Context) bool {
 	defer cancel()
 	out, err := exec.CommandContext(c, "/usr/bin/defaults", "read", "com.apple.sharingd", "DiscoverableMode").Output()
 	if err != nil {
-		// Unset defaults to Contacts Only on macOS.
 		return true
 	}
 	mode := strings.ToLower(strings.TrimSpace(string(out)))

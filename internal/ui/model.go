@@ -67,6 +67,8 @@ type Model struct {
 	link       wifi.LinkInfo
 	prevLink   wifi.LinkInfo
 	hasPrev    bool
+	lastBSSID  string
+	roamCount  int
 	rssiHist   []float64
 	snrHist    []float64
 	downHist   []float64
@@ -191,6 +193,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hasPrev = true
 		m.link = next
 
+		var roamToast tea.Cmd
+		if next.BSSID != "" {
+			if m.lastBSSID != "" && next.BSSID != m.lastBSSID {
+				m.roamCount++
+				roamToast = m.setToast(fmt.Sprintf("AP roam #%d -> %s (Ch %d, %d dBm)", m.roamCount, next.BSSID, next.Channel, next.RSSI))
+			}
+			m.lastBSSID = next.BSSID
+		}
+
 		// Start or restart gateway ping stream whenever the default gateway changes.
 		if next.Gateway != "" && next.Gateway != m.activeGW {
 			if m.gwCancel != nil {
@@ -216,7 +227,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gwStats = m.gwRing.Stats()
 		m.wanStats = m.wanRing.Stats()
 		m.recompute()
-		return m, nil
+		return m, roamToast
 
 	case speedProgressMsg:
 		m.speedProgress = probe.SpeedProgress(msg)
@@ -482,10 +493,16 @@ func (m *Model) readModemFromClipboardCmd() tea.Cmd {
 	return func() tea.Msg {
 		var out []byte
 		var err error
-		if runtime.GOOS == "darwin" {
+		switch runtime.GOOS {
+		case "darwin":
 			out, err = exec.CommandContext(m.ctx, "/usr/bin/pbpaste").Output()
-		} else {
-			out, err = exec.CommandContext(m.ctx, "xclip", "-o", "-selection", "clipboard").Output()
+		case "windows":
+			out, err = exec.CommandContext(m.ctx, "powershell", "-NoProfile", "-Command", "Get-Clipboard").Output()
+		default:
+			out, err = exec.CommandContext(m.ctx, "wl-paste", "-n").Output()
+			if err != nil {
+				out, err = exec.CommandContext(m.ctx, "xclip", "-o", "-selection", "clipboard").Output()
+			}
 		}
 		if err != nil || len(strings.TrimSpace(string(out))) == 0 {
 			return modemLoadedMsg(advisor.ModemReport{})

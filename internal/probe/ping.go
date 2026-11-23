@@ -140,10 +140,25 @@ func (r *PingRing) Stats() PingStats {
 	return st
 }
 
-var rePingTime = regexp.MustCompile(`time[=<]([0-9.]+)\s*ms`)
+var rePingTime = regexp.MustCompile(`time([=<])([0-9.]+)\s*ms`)
 
-// StreamPing runs an OS ping subprocess at interval and delivers each sample to onSample.
-// Using the system ping binary avoids raw-socket root privileges on macOS and Linux.
+func parsePingLineMs(line string) (float64, bool) {
+	m := rePingTime.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	ms, err := strconv.ParseFloat(m[2], 64)
+	if err != nil {
+		return 0, false
+	}
+	if m[1] == "<" && ms <= 1 {
+		ms = 0.5
+	}
+	return ms, true
+}
+
+// StreamPing runs an OS ping subprocess and delivers each sample to onSample.
+// Using the system ping binary avoids raw-socket root privileges on macOS, Linux, and Windows.
 func StreamPing(ctx context.Context, target string, interval time.Duration, onSample func(PingSample)) {
 	if target == "" {
 		return
@@ -162,7 +177,12 @@ func StreamPing(ctx context.Context, target string, interval time.Duration, onSa
 		if ctx.Err() != nil {
 			return
 		}
-		args := []string{"-i", strconv.FormatFloat(intervalSec, 'f', 2, 64), target}
+		var args []string
+		if runtime.GOOS == "windows" {
+			args = []string{"-t", target}
+		} else {
+			args = []string{"-i", strconv.FormatFloat(intervalSec, 'f', 2, 64), target}
+		}
 		cmd := exec.CommandContext(ctx, pingBin, args...)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -177,10 +197,8 @@ func StreamPing(ctx context.Context, target string, interval time.Duration, onSa
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if m := rePingTime.FindStringSubmatch(line); m != nil {
-				if ms, err := strconv.ParseFloat(m[1], 64); err == nil {
-					onSample(PingSample{Timestamp: time.Now(), RTTMs: ms})
-				}
+			if ms, ok := parsePingLineMs(line); ok {
+				onSample(PingSample{Timestamp: time.Now(), RTTMs: ms})
 			} else if containsTimeout(line) {
 				onSample(PingSample{Timestamp: time.Now(), Lost: true})
 			}
@@ -196,7 +214,7 @@ func StreamPing(ctx context.Context, target string, interval time.Duration, onSa
 }
 
 func containsTimeout(line string) bool {
-	return regexp.MustCompile(`(?i)timeout|unreachable|no route|100(\.0)?% packet loss`).MatchString(line)
+	return regexp.MustCompile(`(?i)timeout|timed out|unreachable|no route|100(\.0)?% packet loss`).MatchString(line)
 }
 
 // OneShotPing sends count quick ICMP pings and returns aggregated stats.
@@ -209,15 +227,23 @@ func OneShotPing(ctx context.Context, target string, count int, spikeThresholdMs
 	if runtime.GOOS == "darwin" {
 		pingBin = "/sbin/ping"
 	}
-	c, cancel := context.WithTimeout(ctx, time.Duration(count)*500*time.Millisecond+3*time.Second)
+	timeout := time.Duration(count)*600*time.Millisecond + 4*time.Second
+	if runtime.GOOS == "windows" {
+		timeout = time.Duration(count)*1200*time.Millisecond + 4*time.Second
+	}
+	c, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	out, _ := exec.CommandContext(c, pingBin, "-c", strconv.Itoa(count), "-i", "0.2", target).CombinedOutput()
+	var args []string
+	if runtime.GOOS == "windows" {
+		args = []string{"-n", strconv.Itoa(count), target}
+	} else {
+		args = []string{"-c", strconv.Itoa(count), "-i", "0.2", target}
+	}
+	out, _ := exec.CommandContext(c, pingBin, args...).CombinedOutput()
 	for _, line := range regexp.MustCompile(`\r?\n`).Split(string(out), -1) {
-		if m := rePingTime.FindStringSubmatch(line); m != nil {
-			if ms, err := strconv.ParseFloat(m[1], 64); err == nil {
-				ring.Add(PingSample{Timestamp: time.Now(), RTTMs: ms})
-			}
+		if ms, ok := parsePingLineMs(line); ok {
+			ring.Add(PingSample{Timestamp: time.Now(), RTTMs: ms})
 		} else if containsTimeout(line) {
 			ring.Add(PingSample{Timestamp: time.Now(), Lost: true})
 		}

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,7 +17,10 @@ import (
 	"github.com/bvolpato/sweetspot/internal/wifi"
 )
 
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	wanTarget := flag.String("wan", "1.1.1.1", "WAN target IP/host for continuous latency probing")
 	continuous := flag.Bool("continuous", false, "Start with continuous walk-around throughput probing enabled")
 	modemFile := flag.String("modem", "", "Path to a text file containing cable modem DOCSIS connection stats")
@@ -26,6 +30,11 @@ func main() {
 	withScan := flag.Bool("scan", false, "Include a nearby RF channel scan during --once")
 	interval := flag.Duration("interval", time.Second, "Wi-Fi polling interval")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("sweetspot %s\n", version)
+		return
+	}
 
 	var modemText string
 	if *modemFile != "" {
@@ -103,6 +112,36 @@ func runOnce(wanTarget, modemText string, withSpeed, withScan, asJSON bool) {
 	fmt.Printf("◈ sweetspot  %d/100 (%s) -- %s\n", score.Total, score.Grade, score.Summary)
 	fmt.Printf("  Link:    %s · %d dBm / %d dB SNR · %.0f Mbps PHY · %s (%s)\n",
 		link.ChannelLabel(), link.RSSI, link.SNR, link.TxRateMbps, link.PHYMode, link.Security)
+	var details []string
+	if link.LinkQuality > 0 {
+		details = append(details, fmt.Sprintf("LQM %d", link.LinkQuality))
+	}
+	if link.EffDownMbps > 0 {
+		details = append(details, fmt.Sprintf("Eff %.0f/%.0f Mbps", link.EffDownMbps, link.EffUpMbps))
+	}
+	if link.Scheduler != "" {
+		s := link.Scheduler
+		if link.QoSMode != "" {
+			s += "/" + link.QoSMode
+		}
+		details = append(details, s)
+	}
+	if link.HasCCA {
+		details = append(details, fmt.Sprintf("CCA %d%%", link.CCAPct))
+	}
+	if link.HasMCS {
+		m := fmt.Sprintf("MCS %d", link.MCS)
+		if link.NSS > 0 {
+			m += fmt.Sprintf(" %dx%d", link.NSS, link.NSS)
+		}
+		details = append(details, m)
+	}
+	if link.BSSID != "" {
+		details = append(details, "BSSID "+link.BSSID)
+	}
+	if len(details) > 0 {
+		fmt.Printf("  Details: %s\n", strings.Join(details, " · "))
+	}
 	fmt.Printf("  Router:  avg %.1f ms · max %.1f ms · jitter %.1f ms · loss %.1f%% (%s)\n",
 		gw.AvgMs, gw.MaxMs, gw.JitterMs, gw.LossPct, gw.Target)
 	fmt.Printf("  WAN:     avg %.1f ms · max %.1f ms · jitter %.1f ms · loss %.1f%% (%s)\n",

@@ -22,6 +22,7 @@ type LinkInfo struct {
 	Interface     string    `json:"interface"`
 	DefaultIface  string    `json:"default_interface"`
 	IsEthernet    bool      `json:"is_ethernet"`
+	Privileged    bool      `json:"privileged"`
 	Gateway       string    `json:"gateway"`
 	PowerOn       bool      `json:"power_on"`
 	Connected     bool      `json:"connected"`
@@ -31,12 +32,25 @@ type LinkInfo struct {
 	Noise         int       `json:"noise_dbm"`
 	SNR           int       `json:"snr_db"`
 	TxRateMbps    float64   `json:"tx_rate_mbps"`
+	RxRateMbps    float64   `json:"rx_rate_mbps,omitempty"`
+	EffDownMbps   float64   `json:"eff_down_mbps,omitempty"`
+	EffUpMbps     float64   `json:"eff_up_mbps,omitempty"`
+	LinkQuality   int       `json:"link_quality,omitempty"`
+	Scheduler     string    `json:"scheduler,omitempty"`
+	QoSMode       string    `json:"qos_mode,omitempty"`
 	Channel       int       `json:"channel"`
 	Band          Band      `json:"band"`
 	WidthMHz      int       `json:"width_mhz"`
 	PHYMode       string    `json:"phy_mode"`
 	Security      string    `json:"security"`
 	CountryCode   string    `json:"country_code,omitempty"`
+	MCS           int       `json:"mcs,omitempty"`
+	HasMCS        bool      `json:"has_mcs,omitempty"`
+	NSS           int       `json:"nss,omitempty"`
+	GuardInterval int       `json:"guard_interval_ns,omitempty"`
+	CCAPct        int       `json:"cca_pct,omitempty"`
+	HasCCA        bool      `json:"has_cca,omitempty"`
+	TxRetriesPct  float64   `json:"tx_retries_pct,omitempty"`
 	DNSServers    []string  `json:"dns_servers,omitempty"`
 	InBytes       uint64    `json:"in_bytes"`
 	OutBytes      uint64    `json:"out_bytes"`
@@ -175,7 +189,6 @@ func SummarizeScan(neighbors []NeighborAP, current LinkInfo, duration time.Durat
 		res.CurrentOverlapAPs = countOverlappingAPs(neighbors, current.Band, current.Channel)
 	}
 
-	// Best 2.4 GHz channel among non-overlapping 1, 6, 11.
 	best2 := 1
 	best2Score := 1 << 30
 	for _, ch := range []int{1, 6, 11} {
@@ -187,7 +200,6 @@ func SummarizeScan(neighbors []NeighborAP, current LinkInfo, duration time.Durat
 	}
 	res.Best2GHzChannel = best2
 
-	// Best 5 GHz channel overall (including DFS) and best non-DFS (36-48, 149-161).
 	nonDFS5 := []int{36, 40, 44, 48, 149, 153, 157, 161}
 	all5 := []int{36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161}
 
@@ -195,7 +207,6 @@ func SummarizeScan(neighbors []NeighborAP, current LinkInfo, duration time.Durat
 		best := candidates[0]
 		bestScore := 1 << 30
 		for _, ch := range candidates {
-			// Weight primary-channel hits higher than 80 MHz block overlap.
 			primary := 0
 			for _, ap := range neighbors {
 				if ap.Band == Band5GHz && ap.Channel == ch {
