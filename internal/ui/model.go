@@ -117,7 +117,7 @@ func NewModel(opts Options) *Model {
 
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
-	sp.Style = lipgloss.NewStyle().Foreground(ColCyan)
+	sp.Style = lipgloss.NewStyle()
 
 	ti := textinput.New()
 	ti.Placeholder = "Desk by window, Kitchen, Conf Room..."
