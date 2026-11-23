@@ -469,7 +469,7 @@ func runModem(args []string) {
 	fs := flag.NewFlagSet("sweetspot modem", flag.ExitOnError)
 	clip := fs.Bool("clipboard", false, "Read cable modem status text from clipboard")
 	asJSON := fs.Bool("json", false, "Output JSON")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderFlags(args, fs))
 
 	path := ""
 	if fs.NArg() > 0 {
@@ -519,7 +519,7 @@ func runSpot(args []string) {
 		withSpeed := fs.Bool("speed", false, "Run an active speed burst before pinning")
 		wanTarget := fs.String("wan", "1.1.1.1", "WAN ping target")
 		asJSON := fs.Bool("json", false, "Output JSON")
-		_ = fs.Parse(rest)
+		_ = fs.Parse(reorderFlags(rest, fs))
 		name := strings.Join(fs.Args(), " ")
 
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -605,7 +605,7 @@ func runDiff(args []string) {
 	fs := flag.NewFlagSet("sweetspot diff", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "Output JSON")
 	format := fs.String("format", "markdown", "Output format: markdown, json, text")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderFlags(args, fs))
 	if *asJSON {
 		*format = "json"
 	}
@@ -784,6 +784,39 @@ func isTerminal(f *os.File) bool {
 		return false
 	}
 	return (st.Mode() & os.ModeCharDevice) != 0
+}
+
+// reorderFlags moves flags ahead of positional arguments so Go's flag.FlagSet accepts
+// ergonomic invocations like `sweetspot spot pin "Desk" --speed --json` or `sweetspot diff a.json b.json --json`.
+func reorderFlags(args []string, fs *flag.FlagSet) []string {
+	type boolFlag interface {
+		IsBoolFlag() bool
+	}
+	var flagsPart, posPart []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			posPart = append(posPart, args[i+1:]...)
+			break
+		}
+		if len(a) > 1 && strings.HasPrefix(a, "-") {
+			flagsPart = append(flagsPart, a)
+			if !strings.Contains(a, "=") {
+				name := strings.TrimLeft(a, "-")
+				if f := fs.Lookup(name); f != nil {
+					if bf, ok := f.Value.(boolFlag); !ok || !bf.IsBoolFlag() {
+						if i+1 < len(args) {
+							i++
+							flagsPart = append(flagsPart, args[i])
+						}
+					}
+				}
+			}
+			continue
+		}
+		posPart = append(posPart, a)
+	}
+	return append(flagsPart, posPart...)
 }
 
 func printUsage() {

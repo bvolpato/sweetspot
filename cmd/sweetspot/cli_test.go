@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,5 +80,21 @@ func TestPersistentSpotStoreRoundTrip(t *testing.T) {
 	}
 	if s3 := spots.OpenStore(path); s3.Len() != 1 {
 		t.Fatalf("expected 1 spot after delete persistence, got %d", s3.Len())
+	}
+}
+
+func TestReorderFlagsAllowsTrailingFlagsAfterPositionals(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	format := fs.String("format", "text", "")
+	args := reorderFlags([]string{"before.json", "after.json", "--format", "markdown", "--json"}, fs)
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if !*asJSON || *format != "markdown" {
+		t.Fatalf("expected json=true format=markdown, got json=%v format=%q", *asJSON, *format)
+	}
+	if fs.NArg() != 2 || fs.Arg(0) != "before.json" || fs.Arg(1) != "after.json" {
+		t.Fatalf("unexpected positionals: %v", fs.Args())
 	}
 }
