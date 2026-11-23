@@ -1,0 +1,7 @@
+sweetspot
+dist/
+*.out
+*.prof
+.DS_Store
+sweetspot-report-*.md
+sweetspot-report-*.json
