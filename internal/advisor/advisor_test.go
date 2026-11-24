@@ -136,3 +136,30 @@ func TestDiagnose_CCASaturationAndNoDuplicateAirDrop(t *testing.T) {
 		t.Fatalf("expected comprehensive playbook items, got %d", len(playbook))
 	}
 }
+
+func TestDiagnose_ISPLossAndWeakModem(t *testing.T) {
+	link := wifi.LinkInfo{Connected: true, Band: wifi.Band2GHz, Channel: 9, WidthMHz: 20, RSSI: -78, Noise: -92, SNR: 14, TxRateMbps: 54, PHYMode: "802.11g", Security: "WPA Personal"}
+	gw := probe.PingStats{Target: "192.168.1.1", Sent: 20, Received: 20, LossPct: 0, AvgMs: 5}
+	wan := probe.PingStats{Target: "1.1.1.1", Sent: 20, Received: 18, LossPct: 10.0, AvgMs: 30}
+
+	badModem := ParseModemDiagnostics(`
+1	Locked	256 QAM	1	465000000 Hz	-10.5 dBmV	29.0 dB	90000	80000
+1	Locked	ATDMA	1	5120 Ksym/sec	18200000 Hz	53.2 dBmV
+`)
+	if badModem.Health != "Poor" {
+		t.Fatalf("expected Poor modem health for weak power, low SNR, and 53.2 dBmV upstream, got %q", badModem.Health)
+	}
+
+	advice := Diagnose(link, gw, wan, probe.SpeedResult{}, wifi.ScanResult{}, probe.DNSRaceResult{}, badModem)
+	wantCats := map[string]bool{"ISP / WAN Loss": false, "Router / Band": false, "Router / RF": false, "Security / Speed": false, "Modem Coax": false}
+	for _, a := range advice {
+		if _, ok := wantCats[a.Category]; ok {
+			wantCats[a.Category] = true
+		}
+	}
+	for cat, ok := range wantCats {
+		if !ok {
+			t.Errorf("expected category %q in %+v", cat, advice)
+		}
+	}
+}

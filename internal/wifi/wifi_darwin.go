@@ -103,7 +103,10 @@ func enrichIfconfigVerbose(ctx context.Context, iface string, info *LinkInfo) {
 	if err != nil {
 		return
 	}
-	text := string(out)
+	parseIfconfigVerbose(string(out), info)
+}
+
+func parseIfconfigVerbose(text string, info *LinkInfo) {
 	if m := reLinkQuality.FindStringSubmatch(text); m != nil {
 		info.LinkQuality, _ = strconv.Atoi(m[1])
 	}
@@ -128,8 +131,12 @@ func enrichWdutil(ctx context.Context, info *LinkInfo) {
 	if err != nil {
 		return
 	}
+	parseWdutilInfo(string(out), info)
+}
+
+func parseWdutilInfo(text string, info *LinkInfo) {
 	inWiFi := false
-	for _, raw := range strings.Split(string(out), "\n") {
+	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(raw)
 		if strings.HasPrefix(line, "WIFI") {
 			inWiFi = true
