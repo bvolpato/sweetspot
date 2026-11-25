@@ -31,8 +31,8 @@ func BrailleChart(
 	if chartW < 10 {
 		chartW = 10
 	}
-	if chartH < 3 {
-		chartH = 3
+	if chartH < 1 {
+		chartH = 1
 	}
 
 	const axisW = 8 // e.g. " -35dBm " or " 100ms "

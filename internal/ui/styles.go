@@ -251,17 +251,16 @@ func Badge(label string, bg lipgloss.Color) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg).Padding(0, 1).Render(label)
 }
 
-func CardHeader(icon, title, right string, innerWidth int) string {
-	left := lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(icon+" "+title)
-	if right == "" {
-		return left
+// CardHeader renders a card title with a right-aligned note. It uses the first note that fits
+// and leaves the note out when none does.
+func CardHeader(icon, title string, innerWidth int, rights ...string) string {
+	left := fit(lipgloss.NewStyle().Bold(true).Foreground(ColCyan).Render(icon+" "+title), innerWidth)
+	for _, right := range rights {
+		if gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(right); right != "" && gap >= 2 {
+			return left + strings.Repeat(" ", gap) + StyleMuted.Render(right)
+		}
 	}
-	rightStyled := StyleMuted.Render(right)
-	gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(rightStyled)
-	if gap < 1 {
-		gap = 1
-	}
-	return left + strings.Repeat(" ", gap) + rightStyled
+	return left
 }
 
 func FormatMbps(v float64) string {
