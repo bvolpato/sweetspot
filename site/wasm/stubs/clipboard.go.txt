@@ -1,0 +1,9 @@
+package clipboard
+
+import "errors"
+
+var errNoClipboard = errors.New("no clipboard in the demo")
+
+func readAll() (string, error) { return "", errNoClipboard }
+
+func writeAll(string) error { return errNoClipboard }

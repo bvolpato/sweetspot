@@ -1,3 +1,5 @@
+//go:build !js
+
 package probe
 
 import (
@@ -9,24 +11,6 @@ import (
 	"sync"
 	"time"
 )
-
-// DNSBenchmark captures cached and uncached lookup latency for a single DNS resolver.
-type DNSBenchmark struct {
-	Name       string  `json:"name"`
-	Server     string  `json:"server"`
-	CachedMs   float64 `json:"cached_ms"`
-	UncachedMs float64 `json:"uncached_ms"`
-	Failed     bool    `json:"failed"`
-	IsSystem   bool    `json:"is_system"`
-}
-
-// DNSRaceResult holds the full DNS comparison across common resolvers and the active system resolver.
-type DNSRaceResult struct {
-	Timestamp time.Time      `json:"timestamp"`
-	Entries   []DNSBenchmark `json:"entries"`
-	Fastest   DNSBenchmark   `json:"fastest"`
-	System    DNSBenchmark   `json:"system"`
-}
 
 // RunDNSRace compares System DNS, Cloudflare, Quad9, Google, and the local router in parallel.
 func RunDNSRace(ctx context.Context, gateway string) DNSRaceResult {

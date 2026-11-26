@@ -6,6 +6,8 @@
 
 `sweetspot` is an interactive terminal dashboard for finding the best Wi-Fi spot in a home or office and diagnosing real network bottlenecks on macOS, Linux, and Windows.
 
+**[Try it in your browser](https://bvolpato.github.io/sweetspot/):** the website runs the real interface with a simulated radio.
+
 It renders live multi-row Braille charts for signal strength, throughput, and dual-hop latency without triggering off-channel Wi-Fi scan stutters, compares pinned spots side by side, races DNS resolvers, and analyzes DOCSIS cable modem diagnostics.
 
 ## Features

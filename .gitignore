@@ -5,3 +5,5 @@ dist/
 .DS_Store
 sweetspot-report-*.md
 sweetspot-report-*.json
+site/.build/
+site/dist/

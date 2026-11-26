@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sweetspot: find the best Wi-Fi spot from your terminal</title>
+<meta name="description" content="A terminal dashboard that scores every spot in your home or office, shows what slows your Wi-Fi down, and says what to change. macOS, Linux, and Windows.">
+<meta name="theme-color" content="#06303a">
+<link rel="canonical" href="https://bvolpato.github.io/sweetspot/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Your Wi-Fi is better over there.">
+<meta property="og:description" content="sweetspot finds the best Wi-Fi spot in your home or office, from your terminal. Try the real interface in your browser.">
+<meta property="og:url" content="https://bvolpato.github.io/sweetspot/">
+<meta property="og:image" content="https://bvolpato.github.io/sweetspot/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/anybody.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<a class="skip" href="#install">Skip to install</a>
+
+<header class="nav">
+  <a class="brand" href="#top"><img src="logo.svg" width="38" height="38" alt=""><span>sweetspot</span></a>
+  <nav aria-label="Page">
+    <a href="#tabs">Tabs</a><a href="#blame">Blame</a><a href="#sizes">Sizes</a><a href="#agents">Agents</a><a href="#install">Install</a>
+  </nav>
+  <div class="meter" aria-hidden="true" title="Signal at this point of the page">
+    <span class="bars"><i></i><i></i><i></i><i></i><i></i></span><b id="meter">-86</b><small>dBm</small>
+  </div>
+  <a class="gh" href="https://github.com/bvolpato/sweetspot"><svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.5 15.6c.4.1.5-.2.5-.4v-1.5c-2.2.5-2.7-.9-2.7-.9-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.7-3.7 3.9.3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 0Z"/></svg><span>GitHub</span></a>
+</header>
+
+<main id="top">
+<section class="hero" data-dbm="-86">
+  <canvas id="air" aria-hidden="true"></canvas>
+  <canvas id="pulse" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <h1 class="wave" aria-label="Your Wi-Fi is better over there."><span class="line" aria-hidden="true">Your Wi-Fi is</span><span class="line" aria-hidden="true">better over there.</span></h1>
+    <div class="pitch">
+      <p>sweetspot is a terminal dashboard for walking around with your laptop. It scores every spot, shows what is slowing you down, and says what to change.</p>
+      <div class="get">
+        <div class="cmd"><code>brew install bvolpato/tap/sweetspot</code><button type="button" data-copy="brew install bvolpato/tap/sweetspot">Copy</button></div>
+        <small>Free and open source. macOS, Linux, and Windows. No sudo needed. <a href="#install">Other ways to install</a></small>
+      </div>
+    </div>
+
+    <noscript><style>.stage, .hops, .verdict, .picks, .sizer, .tour .term, .meter { display: none !important; }</style><img class="still" src="og.png" width="1200" height="630" alt="The sweetspot terminal next to a floor plan with Wi-Fi signal bands"></noscript>
+    <div class="stage">
+      <div class="floor">
+        <div id="plan" class="plan">
+          <button type="button" class="thing router" id="router" aria-label="Router. Use the arrow keys to move it."><svg viewBox="0 0 48 40" aria-hidden="true"><path d="M11 22 6 4M37 22l5-18" fill="none" stroke="#06303a" stroke-width="3.5" stroke-linecap="round"/><rect x="3" y="21" width="42" height="16" rx="5" fill="#fff" stroke="#06303a" stroke-width="3"/><circle cx="12" cy="29" r="2.6" fill="#ff2d78"/><circle cx="20" cy="29" r="2.6" fill="#ff8b3a"/><circle cx="28" cy="29" r="2.6" fill="#0b7a80"/></svg></button>
+          <button type="button" class="thing laptop" id="laptop" aria-label="Laptop. Use the arrow keys to move it."><svg viewBox="0 0 52 40" aria-hidden="true"><rect x="9" y="3" width="34" height="25" rx="3.5" fill="#0a0f1c" stroke="#fff" stroke-width="3"/><path d="M15 20l5-6 5 4 4-7 4 9" fill="none" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 34h46l-5-6H8z" fill="#fff" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg><span class="tag"><b id="tag-dbm">-86 dBm</b><i id="tag-score">F</i></span></button>
+          <span class="nudge" id="nudge" aria-hidden="true">Drag me out of here</span>
+        </div>
+        <div class="legend" aria-hidden="true"><span>dead</span><i></i><i></i><i></i><i></i><i></i><i></i><span>sweet</span></div>
+        <div class="break" role="group" aria-label="Break something">
+          <span>Break something</span>
+          <button type="button" aria-pressed="false" data-flag="band24">2.4 GHz</button>
+          <button type="button" aria-pressed="false" data-flag="microwave">Microwave</button>
+          <button type="button" aria-pressed="false" data-flag="narrow">40 MHz channel</button>
+          <button type="button" aria-pressed="false" data-flag="crowded">Loud neighbors</button>
+          <button type="button" aria-pressed="false" data-flag="upload">Huge upload</button>
+          <button type="button" aria-pressed="false" data-flag="airdrop">AirDrop</button>
+          <button type="button" aria-pressed="false" data-flag="coax">Bad coax</button>
+          <button type="button" aria-pressed="false" data-flag="sudo" class="sudo">Run as sudo</button>
+        </div>
+        <p class="say" id="say" aria-live="polite">Drag the laptop. Drag the router, too.</p>
+      </div>
+
+      <figure class="rig" id="hero-rig">
+        <div class="term" data-term="hero"><canvas tabindex="0" role="application" aria-label="sweetspot terminal demo. Keys 1 to 4 switch tabs, and Space pins a spot."></canvas></div>
+        <div class="keys" role="group" aria-label="Terminal keys">
+          <button type="button" data-key="1"><kbd>1</kbd>Radar</button><button type="button" data-key="2"><kbd>2</kbd>Spots</button><button type="button" data-key="3"><kbd>3</kbd>RF</button><button type="button" data-key="4"><kbd>4</kbd>Advisor</button>
+          <button type="button" data-key="pin"><kbd>Space</kbd>Pin</button><button type="button" data-key="b"><kbd>b</kbd>Speed</button><button type="button" data-key="s"><kbd>s</kbd>Scan</button><button type="button" data-key="r"><kbd>r</kbd>DNS</button>
+        </div>
+        <figcaption>This is the real interface, compiled from Go to WebAssembly. Only the radio is simulated, and nothing is sent anywhere.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="band teal" id="tabs" data-dbm="-72">
+  <div class="wrap">
+    <h2>Four tabs.<br>Four answers.</h2>
+    <div class="tour">
+      <div class="tablist" role="tablist" aria-label="sweetspot tabs" aria-orientation="vertical">
+        <button type="button" role="tab" aria-selected="true" aria-controls="tour-panel" data-tour="1"><kbd>1</kbd><span><b>How good is this spot?</b><em>Radar shows signal, noise, PHY rate, throughput, and two latency charts, live while you walk. It never scans in the background, so measuring does not cause stutter.</em></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="tour-panel" tabindex="-1" data-tour="2"><kbd>2</kbd><span><b>Which spot won?</b><em>Press Space to pin where you stand. Spots ranks every pin by a score from 0 to 100 and keeps them between runs.</em></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="tour-panel" tabindex="-1" data-tour="3"><kbd>3</kbd><span><b>Is it the channel, or DNS?</b><em>Scan nearby networks when you ask for it, see the cleanest channels, and race your DNS against the public resolvers.</em></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="tour-panel" tabindex="-1" data-tour="4"><kbd>4</kbd><span><b>What do I change?</b><em>Advisor ranks findings by severity, with the measurement behind each one and the setting to change. It reads cable modem status pages, too.</em></span></button>
+      </div>
+      <div class="term big" id="tour-panel" role="tabpanel" data-term="tour"><canvas role="img" aria-label="sweetspot terminal tour"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section class="band mint" id="blame" data-dbm="-62">
+  <div class="wrap">
+    <div class="split">
+      <h2>Is it the <span class="nb">Wi-Fi</span> or the&nbsp;ISP?</h2>
+      <p>sweetspot pings your router and the internet at the same time. If the first hop is bad, the problem is in your home. If only the second hop is bad, you can stop moving the router.</p>
+    </div>
+    <div class="picks" role="group" aria-label="Break a hop">
+      <button type="button" aria-pressed="true" data-blame="none">All good</button><button type="button" aria-pressed="false" data-blame="wifi">Break the Wi-Fi</button><button type="button" aria-pressed="false" data-blame="isp">Break the ISP</button>
+    </div>
+    <div class="hops">
+      <canvas id="hops" aria-hidden="true"></canvas>
+      <div class="hop"><b>Your laptop</b></div>
+      <div class="hop mid"><b>Your router</b></div>
+      <div class="hop end"><b>The internet</b></div>
+      <dl class="leg a"><dt>Router hop</dt><dd id="gw">…</dd></dl>
+      <dl class="leg b"><dt>Internet (1.1.1.1)</dt><dd id="wan">…</dd></dl>
+    </div>
+    <div class="verdict"><span id="v-sev" class="sev">GOOD</span><div><b id="v-title">…</b><p id="v-action"></p></div></div>
+  </div>
+</section>
+
+<section class="band sun" id="sizes" data-dbm="-54">
+  <div class="wrap">
+    <div class="split">
+      <h2>Fits the terminal you have.</h2>
+      <p>Drag the corner. Cards keep their most important rows, text never wraps into the next card, and the header stays put. New in 0.2.2.</p>
+    </div>
+    <div class="picks sizes" role="group" aria-label="Terminal size">
+      <button type="button" data-size="150x40">150×40</button><button type="button" data-size="100x30">100×30</button><button type="button" data-size="80x24">80×24</button><button type="button" data-size="60x44">60×44</button><button type="button" data-size="40x12">40×12</button>
+      <output id="size-now">128×34</output>
+    </div>
+    <div class="sizer"><div class="term" data-term="size" id="sizer"><canvas role="img" aria-label="sweetspot at the selected terminal size"></canvas><button type="button" class="grip" id="grip" aria-label="Resize the terminal. Use the arrow keys."><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M18 4 4 18M18 11l-7 7" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button></div></div>
+  </div>
+</section>
+
+<section class="band tang" id="agents" data-dbm="-46">
+  <div class="wrap">
+    <div class="split">
+      <h2>Hand it to your agent.</h2>
+      <p>Every command prints JSON, with exit codes a script can trust. Take a snapshot, change one thing, take another, and compare.</p>
+    </div>
+    <div class="agent">
+      <pre class="code" tabindex="0" aria-label="Example commands"><code><i># 1. Measure</i>
+sweetspot diagnose --speed --scan --out before.json --json
+
+<i># 2. Change one router setting, then measure again</i>
+sweetspot diagnose --speed --out after.json --json
+
+<i># 3. Compare</i>
+sweetspot diff before.json after.json --format markdown
+
+<i># Fail a script when a spot scores below 80 (exit code 3)</i>
+sweetspot diagnose --fail-below 80 --json</code></pre>
+      <div class="diff" tabindex="0" role="region" aria-label="Example comparison">
+        <table>
+          <thead><tr><th scope="col">Metric</th><th scope="col">Before</th><th scope="col">After</th></tr></thead>
+          <tbody>
+            <tr class="top"><th scope="row">SweetSpot Score</th><td>77/100 (B)</td><td>92/100 (A)</td></tr>
+            <tr><th scope="row">Wi-Fi Link</th><td>40 MHz, 516 Mbps</td><td>80 MHz, 1081 Mbps</td></tr>
+            <tr><th scope="row">Downlink</th><td>212.4 Mbps</td><td>438.7 Mbps</td></tr>
+            <tr><th scope="row">Uplink</th><td>18.6 Mbps</td><td>38.2 Mbps</td></tr>
+            <tr><th scope="row">Loaded Responsiveness</th><td>221 RPM</td><td>1180 RPM</td></tr>
+            <tr><th scope="row">Router Ping jitter</th><td>4.8 ms</td><td>1.1 ms</td></tr>
+            <tr><th scope="row">System DNS</th><td>46.5 ms</td><td>18.4 ms</td></tr>
+          </tbody>
+        </table>
+        <small>Example data, shortened. The score comes from the real scoring code.</small>
+      </div>
+    </div>
+    <ul class="cmds">
+      <li><code>status</code> radio snapshot, no probes</li><li><code>scan</code> channel congestion</li><li><code>ping</code> both hops</li><li><code>speed</code> download, upload, bufferbloat</li><li><code>dns</code> resolver race</li><li><code>modem</code> DOCSIS status page</li><li><code>spot</code> pinned spots</li><li><code>diff</code> before and after</li>
+    </ul>
+  </div>
+</section>
+
+<section class="band pink" id="install" data-dbm="-34">
+  <div class="rings" aria-hidden="true"><i></i></div>
+  <div class="wrap">
+    <img class="mascot" src="logo.svg" width="180" height="180" alt="The sweetspot gopher, with an antenna and a laptop">
+    <h2>This is the sweet&nbsp;spot.</h2>
+    <div class="ways">
+      <div><h3>Homebrew</h3><p>macOS and Linux</p><div class="cmd"><code>brew install bvolpato/tap/sweetspot</code><button type="button" data-copy="brew install bvolpato/tap/sweetspot">Copy</button></div></div>
+      <div><h3>Go</h3><p>On macOS, this needs the Xcode Command Line Tools</p><div class="cmd"><code>go install github.com/bvolpato/sweetspot/cmd/sweetspot@latest</code><button type="button" data-copy="go install github.com/bvolpato/sweetspot/cmd/sweetspot@latest">Copy</button></div></div>
+      <div><h3>Download</h3><p>macOS, Linux, and Windows, for Intel and ARM</p><a class="dl" href="https://github.com/bvolpato/sweetspot/releases/latest">Get the latest release</a></div>
+    </div>
+    <p class="then">Then run <code>sweetspot</code>, pick up your laptop, and walk.</p>
+  </div>
+  <footer>
+    <p>MIT License. <a href="https://github.com/bvolpato/sweetspot">Source</a>, <a href="https://github.com/bvolpato/sweetspot/releases">releases</a>, <a href="https://github.com/bvolpato/sweetspot/issues">issues</a>.</p>
+    <p>The Go gopher was designed by Renee French (CC BY 4.0). Fonts: Anybody, Atkinson Hyperlegible Next, and JetBrains Mono (<a href="fonts/OFL.txt">OFL</a>).</p>
+  </footer>
+</section>
+</main>
+<noscript><p class="nojs">The live demos on this page need JavaScript.</p></noscript>
+</body>
+</html>
