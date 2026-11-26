@@ -49,7 +49,7 @@
       </div>
     </div>
 
-    <noscript><style>.stage, .hops, .verdict, .picks, .sizer, .tour .term, .meter { display: none !important; }</style><img class="still" src="og.png" width="1200" height="630" alt="The sweetspot terminal next to a floor plan with Wi-Fi signal bands"></noscript>
+    <noscript><style>.stage, .desk, .hops, .verdict, .picks, .sizer, .tour .term, .meter { display: none !important; }</style><img class="still" src="og.png" width="1200" height="630" alt="The sweetspot terminal next to a floor plan with Wi-Fi signal bands"></noscript>
     <div class="stage">
       <div class="floor">
         <div id="plan" class="plan">
@@ -57,29 +57,24 @@
           <button type="button" class="thing laptop" id="laptop" aria-label="Laptop. Use the arrow keys to move it."><svg viewBox="0 0 52 40" aria-hidden="true"><rect x="9" y="3" width="34" height="25" rx="3.5" fill="#0a0f1c" stroke="#fff" stroke-width="3"/><path d="M15 20l5-6 5 4 4-7 4 9" fill="none" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 34h46l-5-6H8z" fill="#fff" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg><span class="tag"><b id="tag-dbm">-86 dBm</b><i id="tag-score">F</i></span></button>
           <span class="nudge" id="nudge" aria-hidden="true">Drag me out of here</span>
         </div>
-        <div class="legend" aria-hidden="true"><span>dead</span><i></i><i></i><i></i><i></i><i></i><i></i><span>sweet</span></div>
-        <div class="break" role="group" aria-label="Break something">
-          <span>Break something</span>
-          <button type="button" aria-pressed="false" data-flag="band24">2.4 GHz</button>
-          <button type="button" aria-pressed="false" data-flag="microwave">Microwave</button>
-          <button type="button" aria-pressed="false" data-flag="narrow">40 MHz channel</button>
-          <button type="button" aria-pressed="false" data-flag="crowded">Loud neighbors</button>
-          <button type="button" aria-pressed="false" data-flag="upload">Huge upload</button>
-          <button type="button" aria-pressed="false" data-flag="airdrop">AirDrop</button>
-          <button type="button" aria-pressed="false" data-flag="coax">Bad coax</button>
-          <button type="button" aria-pressed="false" data-flag="sudo" class="sudo">Run as sudo</button>
-        </div>
-        <p class="say" id="say" aria-live="polite">Drag the laptop. Drag the router, too.</p>
+        <div class="legend" aria-hidden="true"><span>dead</span><i></i><i></i><i></i><i></i><i></i><i></i><span>sweet</span><em>on 2.4 GHz</em></div>
+        <div class="setups" id="setups" role="group" aria-label="Try a setup"></div>
+        <p class="say" id="say" aria-live="polite">Drag the laptop and the router, or change anything below.</p>
       </div>
 
       <figure class="rig" id="hero-rig">
         <div class="term" data-term="hero"><canvas tabindex="0" role="application" aria-label="sweetspot terminal demo. Keys 1 to 4 switch tabs, and Space pins a spot."></canvas></div>
         <div class="keys" role="group" aria-label="Terminal keys">
           <button type="button" data-key="1"><kbd>1</kbd>Radar</button><button type="button" data-key="2"><kbd>2</kbd>Spots</button><button type="button" data-key="3"><kbd>3</kbd>RF</button><button type="button" data-key="4"><kbd>4</kbd>Advisor</button>
-          <button type="button" data-key="pin"><kbd>Space</kbd>Pin</button><button type="button" data-key="b"><kbd>b</kbd>Speed</button><button type="button" data-key="s"><kbd>s</kbd>Scan</button><button type="button" data-key="r"><kbd>r</kbd>DNS</button>
+          <button type="button" data-key="pin"><kbd>␣</kbd>Pin</button><button type="button" data-key="b"><kbd>b</kbd>Speed</button><button type="button" data-key="s"><kbd>s</kbd>Scan</button><button type="button" data-key="r"><kbd>r</kbd>DNS</button>
         </div>
-        <figcaption>This is the real interface, compiled from Go to WebAssembly. Only the radio is simulated, and nothing is sent anywhere.</figcaption>
       </figure>
+    </div>
+
+    <div class="desk">
+      <div class="panel" id="panel"></div>
+      <p class="top"><span class="sev" id="top-sev">…</span><span><b id="top-title">Advisor is starting.</b> <span id="top-action"></span></span></p>
+      <p class="fine">This is the real interface, compiled from Go to WebAssembly. Only the radio is simulated, and nothing is sent anywhere.</p>
     </div>
   </div>
 </section>

@@ -1,4 +1,5 @@
-import { PLAN, START, Sim, newWorld, field, rssiAt, roomAt } from './sim.js';
+import { PLAN, START, STEER, Sim, newWorld, field, linkAt, rssiAt, roomAt } from './sim.js';
+import { buildPanel } from './controls.js';
 import { LEVELS, COLORS, bandColor, rings, trace } from './bands.js';
 import { Screen } from './terminal.js';
 
@@ -136,14 +137,14 @@ function drawPlan() {
       <g stroke="#062229" stroke-width="18">${walls.filter((w) => w[5] === 'ext').map((w) => line(w)).join('')}</g>
       <g stroke="#062229" stroke-width="18">${walls.filter((w) => w[5] === 'win').map((w) => line(w)).join('')}</g>
       <g stroke="#effbf4" stroke-width="6" stroke-linecap="butt">${walls.filter((w) => w[5] === 'win').map((w) => line(w)).join('')}</g>
-      <g stroke="#062229" stroke-width="10">${walls.filter((w) => w[5] === 'int').map((w) => line(w)).join('')}</g>
+      <g id="inner" stroke="#062229" stroke-width="9">${walls.filter((w) => w[5] === 'int').map((w) => line(w)).join('')}</g>
     </g>
     <g font-family="Anybody, sans-serif" font-weight="700" font-size="27" text-anchor="middle">${labels}</g>
     <g id="micro" opacity="0"><path d="M1090 70q30-34 60 0t60 0M1090 100q30-34 60 0t60 0" fill="none" stroke="#ff2d78" stroke-width="9" stroke-linecap="round"/></g>
   </svg>`);
 }
 
-let geo = null, cached = null, pulseField = null, dirty = true;
+let geo = null, pulseField = null, dirty = true;
 
 function measure() {
   const h = heroEl.getBoundingClientRect(), p = plan.getBoundingClientRect();
@@ -159,7 +160,7 @@ function drawAir() {
   const step = Math.max(0.16, Math.sqrt((W / s) * (H / s) / 17000));
   const x0 = -ox / s - step, y0 = -oy / s - step;
   const cols = Math.ceil(W / s / step) + 3, rows = Math.ceil(H / s / step) + 3;
-  const f = field(world, x0, y0, cols, rows, step);
+  const { f, steer } = field(world, x0, y0, cols, rows, step);
   pulseField = { f, cols, rows, step, x0, y0 };
   const g = new Float32Array(f);
   for (let k = 0; k < g.length; k++) g[k] = Math.min(g[k] - 4, LEVELS[1] - 1);
@@ -184,6 +185,18 @@ function drawAir() {
   c.fillStyle = '#06303a';
   c.fillRect(ox, oy, PLAN.w * s, PLAN.h * s);
   paint(f, 0);
+  if (steer) {
+    // Hatch the area where the router moves the laptop to 2.4 GHz.
+    const five = new Path2D();
+    five.rect(ox, oy, PLAN.w * s, PLAN.h * s);
+    trace(five, rings(steer, cols, rows, STEER), step * s, step * s, ox + x0 * s, oy + y0 * s);
+    c.clip(five, 'evenodd');
+    c.strokeStyle = 'rgba(239,251,244,.5)';
+    c.lineWidth = 1.6;
+    c.beginPath();
+    for (let d = -PLAN.h * s; d < PLAN.w * s; d += 11) { c.moveTo(ox + d, oy + PLAN.h * s); c.lineTo(ox + d + PLAN.h * s, oy); }
+    c.stroke();
+  }
   c.restore();
   // Room names stay readable on every band.
   for (const t of $$('[data-room]', plan)) {
@@ -228,8 +241,8 @@ function place(el, p) { el.style.left = (p.x / PLAN.w) * 100 + '%'; el.style.top
 
 function readout() {
   const { x, y } = world.laptop;
-  const dbm = hero.lastRssi ?? Math.round(rssiAt(world, x, y));
-  $('#tag-dbm').textContent = `${dbm} dBm`;
+  const at = linkAt(world, x, y, hero.sim.band), dbm = Math.round(at.rssi);
+  $('#tag-dbm').textContent = `${dbm} dBm${world.set.band === 'dual' ? ` · ${at.band}G` : ''}`;
   laptop.style.setProperty('--now', bandColor(dbm));
   laptop.style.setProperty('--on-now', dbm < LEVELS[2] ? '#effbf4' : '#062229');
   if (geo) {
@@ -245,11 +258,9 @@ function moved(which) {
     const last = trail[trail.length - 1];
     if (!last || Math.hypot(last.x - world.laptop.x, last.y - world.laptop.y) > 0.28) { trail.push({ ...world.laptop }); if (trail.length > 46) trail.shift(); }
     place(laptop, world.laptop);
-    hero.lastRssi = Math.round(rssiAt(world, world.laptop.x, world.laptop.y));
     if (!nudged) { nudged = true; $('#nudge').classList.add('off'); }
   } else {
     place(router, world.router);
-    hero.lastRssi = Math.round(rssiAt(world, world.laptop.x, world.laptop.y));
     dirty = true;
   }
   readout();
@@ -290,26 +301,27 @@ plan.addEventListener('click', (e) => {
 });
 laptop.addEventListener('pointerdown', () => { walk = null; });
 
-const LINES = {
-  band24: [() => '2.4 GHz goes through walls better, but it is slow and crowded. The laptop now uses channel 6.', 'Back on 5 GHz.'],
-  microwave: [(f) => (f.band24 ? 'Popcorn time. The noise floor jumps near the kitchen.' : 'A microwave leaks near 2.4 GHz. Your 5 GHz link does not even notice. Turn on 2.4 GHz to feel it.'), 'Popcorn is ready.'],
-  narrow: [() => 'Half the channel width, about half the top speed.', 'Back to 80 MHz.'],
-  crowded: [() => 'Eleven neighbors now share your channel. Press s to scan for a cleaner one.', 'The neighbors went to bed.'],
-  upload: [() => 'Somebody is backing up every photo they own. Press b to measure the damage.', 'The backup is done. Press b to measure again.'],
-  airdrop: [() => 'macOS leaves your channel now and then to look for AirDrop peers. Watch the router chart.', 'AirDrop is off.'],
-  coax: [() => 'The cable modem reports weak signal and errors. Open tab 4.', 'A technician tightened the connector.'],
-  sudo: [() => 'sudo unlocks airtime, MCS, spatial streams, and the network name.', 'Back to a normal user. Nothing else changes.'],
-};
-for (const b of $$('[data-flag]')) {
-  b.addEventListener('click', () => {
-    const k = b.dataset.flag, on = (world.flags[k] = !world.flags[k]);
-    b.setAttribute('aria-pressed', on);
-    say(on ? LINES[k][0](world.flags) : LINES[k][1]);
-    if (k === 'band24') { dirty = true; hero.lastRssi = null; readout(); }
-    if (k === 'microwave') $('#micro').setAttribute('opacity', on ? 1 : 0);
-    hero.tick();
-  });
+// Settings. A change that needs a new measurement starts one, once there is a result to replace.
+let again = 0;
+function remeasure() {
+  clearTimeout(again);
+  again = setTimeout(() => { if (hero.state?.measured) hero.state.busy ? remeasure() : hero.key('b'); }, 900);
 }
+function changed(key, message) {
+  const { set } = world;
+  say(message);
+  dirty = true;
+  $('#micro').setAttribute('opacity', set.microwave ? 1 : 0);
+  $('#inner').setAttribute('stroke-width', { wood: 9, brick: 13, concrete: 18 }[set.walls]);
+  $('.legend').classList.toggle('dual', set.band === 'dual');
+  if (key === 'setup') place(router, world.router);
+  readout();
+  // A setup starts with fresh samples, so the numbers match it at once.
+  if (key === 'setup' && hero.started) hero.steps(50);
+  else hero.tick();
+  remeasure();
+}
+buildPanel($('#panel'), $('#setups'), world, changed);
 
 for (const b of $$('#hero-rig [data-key]')) {
   b.addEventListener('click', () => {
@@ -339,6 +351,11 @@ hero.canvas.addEventListener('click', (e) => {
 
 hero.onstate = (st) => {
   $('#tag-score').textContent = `${st.score.total} ${st.score.grade}`;
+  const a = st.advice?.[0];
+  if (!a) return;
+  const sev = $('#top-sev');
+  sev.textContent = a.severity; sev.className = 'sev ' + a.severity;
+  if ($('#top-title').textContent !== a.title) { $('#top-title').textContent = a.title; $('#top-action').textContent = a.action; }
 };
 
 /* ---------- Headline: letters swell like signal bands ---------- */
@@ -442,7 +459,7 @@ let leg = 0;
 
 /* ---------- Blame: which hop is bad ---------- */
 
-const blameWorld = newWorld();
+const blameWorld = newWorld({ neighbors: 4 });
 Object.assign(blameWorld.laptop, { x: 8.2, y: 2.6 });
 const blame = new Term('none', { world: blameWorld, seed: 5, warm: 60 });
 blame.mode = 'none';
@@ -461,7 +478,7 @@ for (const b of $$('[data-blame]')) {
   b.addEventListener('click', () => {
     for (const o of $$('[data-blame]')) o.setAttribute('aria-pressed', o === b);
     blame.mode = b.dataset.blame;
-    blameWorld.flags.crowded = blame.mode === 'wifi';
+    blameWorld.set.neighbors = blame.mode === 'wifi' ? 36 : 4;
     blame.isp = blame.mode === 'isp';
     blame.steps(50);
   });

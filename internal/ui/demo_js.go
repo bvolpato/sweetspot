@@ -32,35 +32,39 @@ type Demo struct {
 	contWait  int
 	scanWait  int
 	dnsWait   int
+	modemOpen bool
 }
 
 // DemoSample is one simulated reading. Seconds is the simulated time since the last one.
 type DemoSample struct {
-	Seconds   float64   `json:"seconds"`
-	Room      string    `json:"room"`
-	RSSI      float64   `json:"rssi"`
-	Noise     float64   `json:"noise"`
-	Band24    bool      `json:"band24"`
-	Channel   int       `json:"channel"`
-	WidthMHz  int       `json:"width"`
-	PhyMbps   float64   `json:"phy"`
-	EffMbps   float64   `json:"eff"`
-	MCS       int       `json:"mcs"`
-	NSS       int       `json:"nss"`
-	CCA       int       `json:"cca"`
-	Retries   float64   `json:"retries"`
-	RxMbps    float64   `json:"rx"`
-	TxMbps    float64   `json:"tx"`
-	GwRTT     []float64 `json:"gw"`  // a negative value is a lost packet
-	WanRTT    []float64 `json:"wan"` // a negative value is a lost packet
-	Down      float64   `json:"down"`
-	Up        float64   `json:"up"`
-	Bloat     float64   `json:"bloat"`
-	Sudo      bool      `json:"sudo"`
-	AirDrop   bool      `json:"airdrop"`
-	Crowded   bool      `json:"crowded"`
-	BadCoax   bool      `json:"badCoax"`
-	ModemSeen bool      `json:"modemSeen"`
+	Seconds   float64        `json:"seconds"`
+	Room      string         `json:"room"`
+	RSSI      float64        `json:"rssi"`
+	Noise     float64        `json:"noise"`
+	Band      string         `json:"band"` // "2.4", "5", or "6"
+	Channel   int            `json:"channel"`
+	WidthMHz  int            `json:"width"`
+	PhyMbps   float64        `json:"phy"`
+	EffMbps   float64        `json:"eff"`
+	RxMbps    float64        `json:"rx"`
+	TxMbps    float64        `json:"tx"`
+	GwRTT     []float64      `json:"gw"`  // a negative value is a lost packet
+	WanRTT    []float64      `json:"wan"` // a negative value is a lost packet
+	Down      float64        `json:"down"`
+	Up        float64        `json:"up"`
+	Bloat     float64        `json:"bloat"`
+	AirDrop   bool           `json:"airdrop"`
+	Line      string         `json:"line"` // "none", "good", "weak", or "hot"
+	DNS       string         `json:"dns"`  // "isp", "cf", or "quad9"
+	Neighbors []DemoNeighbor `json:"neighbors"`
+}
+
+// DemoNeighbor is one simulated network nearby.
+type DemoNeighbor struct {
+	Band     string `json:"band"`
+	Channel  int    `json:"ch"`
+	WidthMHz int    `json:"width"`
+	RSSI     int    `json:"rssi"`
 }
 
 const demoGateway = "192.168.1.1"
@@ -74,7 +78,8 @@ func NewDemo(cols, rows int) *Demo {
 	m.activeGW = demoGateway // a known gateway stops Update from starting a ping process
 	m.gwRing = probe.NewPingRing(demoGateway, 96, 40)
 	m.wanRing = probe.NewPingRing("1.1.1.1", 96, 80)
-	d := &Demo{m: m, clock: time.Now()}
+	m.dnsRunning = true // the real program starts with a DNS race, too
+	d := &Demo{m: m, clock: time.Now(), dnsWait: 4}
 	d.Resize(cols, rows)
 	return d
 }
@@ -87,6 +92,7 @@ func (d *Demo) Resize(cols, rows int) {
 
 // Step applies one simulated reading.
 func (d *Demo) Step(s DemoSample) {
+	was := d.last
 	d.last = s
 	d.clock = d.clock.Add(time.Duration(s.Seconds * float64(time.Second)))
 	d.inBytes += uint64(s.RxMbps * 1e6 / 8 * s.Seconds)
@@ -99,6 +105,7 @@ func (d *Demo) Step(s DemoSample) {
 	}
 	d.m.Update(linkSampleMsg(d.link()))
 	d.m.Update(d.m.spinner.Tick())
+	d.refresh(was)
 	d.progress()
 	d.ageToast(s.Seconds)
 }
@@ -112,19 +119,46 @@ func (d *Demo) link() wifi.LinkInfo {
 		RSSI: rssi, Noise: noise, SNR: rssi - noise,
 		TxRateMbps: math.Round(s.PhyMbps), EffDownMbps: math.Round(s.EffMbps),
 		LinkQuality: int(math.Max(0, math.Min(100, float64(rssi-noise)*2.4))),
-		Scheduler:   "FQ_CODEL", Channel: s.Channel, Band: wifi.Band5GHz, WidthMHz: s.WidthMHz,
-		PHYMode: "802.11ax (Wi-Fi 6)", Security: "WPA3 Personal", TxRetriesPct: s.Retries,
-		DNSServers: []string{demoGateway}, InBytes: d.inBytes, OutBytes: d.outBytes, AirDropActive: s.AirDrop,
-	}
-	if s.Band24 {
-		l.Band = wifi.Band2GHz
-	}
-	if s.Sudo {
-		l.Privileged, l.SSID, l.BSSID = true, "LAN Solo", "02:00:5e:10:00:01"
-		l.HasMCS, l.MCS, l.NSS, l.GuardInterval = true, s.MCS, s.NSS, 800
-		l.HasCCA, l.CCAPct = true, s.CCA
+		Scheduler:   "FQ_CODEL", Channel: s.Channel, Band: demoBand(s.Band), WidthMHz: s.WidthMHz,
+		PHYMode: "802.11ax (Wi-Fi 6)", Security: "WPA3 Personal",
+		DNSServers: []string{demoServers[s.DNS]}, InBytes: d.inBytes, OutBytes: d.outBytes, AirDropActive: s.AirDrop,
 	}
 	return l
+}
+
+// refresh repeats a scan, a DNS race, or a modem report that a settings change made stale.
+func (d *Demo) refresh(was DemoSample) {
+	m, s := d.m, d.last
+	stale := false
+	if m.scan.TotalAPs > 0 && (was.Band != s.Band || was.Channel != s.Channel || was.WidthMHz != s.WidthMHz || len(was.Neighbors) != len(s.Neighbors)) {
+		m.scan = wifi.SummarizeScan(demoNeighbors(s.Neighbors), m.link, 1400*time.Millisecond)
+		stale = true
+	}
+	if len(m.dns.Entries) > 0 && was.DNS != s.DNS {
+		m.dns = demoDNS(s.DNS)
+		stale = true
+	}
+	if was.Line != s.Line {
+		d.modemOpen = s.Line == "weak" || s.Line == "hot" || (d.modemOpen && s.Line == "good")
+		m.modem = advisor.ModemReport{}
+		if d.modemOpen {
+			m.modem = advisor.ParseModemDiagnostics(demoModem(s.Line))
+		}
+		stale = true
+	}
+	if stale {
+		m.recompute()
+	}
+}
+
+func demoBand(b string) wifi.Band {
+	switch b {
+	case "2.4":
+		return wifi.Band2GHz
+	case "6":
+		return wifi.Band6GHz
+	}
+	return wifi.Band5GHz
 }
 
 // progress moves the simulated speed, scan, and DNS runs forward by one step.
@@ -154,20 +188,13 @@ func (d *Demo) progress() {
 	}
 	if d.scanWait > 0 {
 		if d.scanWait--; d.scanWait == 0 {
-			m.Update(scanDoneMsg(wifi.SummarizeScan(demoNeighbors(s.Crowded), m.link, 1400*time.Millisecond)))
+			m.Update(scanDoneMsg(wifi.SummarizeScan(demoNeighbors(s.Neighbors), m.link, 1400*time.Millisecond)))
 		}
 	}
 	if d.dnsWait > 0 {
 		if d.dnsWait--; d.dnsWait == 0 {
-			m.Update(dnsDoneMsg(demoDNS()))
+			m.Update(dnsDoneMsg(demoDNS(s.DNS)))
 		}
-	}
-	if s.ModemSeen && !m.modem.Parsed {
-		m.modem = advisor.ParseModemDiagnostics(demoModem(s.BadCoax))
-		m.recompute()
-	} else if !s.ModemSeen && m.modem.Parsed {
-		m.modem = advisor.ModemReport{}
-		m.recompute()
 	}
 }
 
@@ -212,7 +239,8 @@ func (d *Demo) Key(key string) {
 			m.setToast("Racing DNS resolvers (System, 1.1.1.1, 9.9.9.9, 8.8.8.8, Router)...")
 		}
 	case "m":
-		m.Update(modemLoadedMsg(advisor.ParseModemDiagnostics(demoModem(d.last.BadCoax))))
+		d.modemOpen = d.last.Line != "none"
+		m.Update(modemLoadedMsg(advisor.ParseModemDiagnostics(demoModem(d.last.Line))))
 	case "e":
 		m.setToast("This demo has no disk. Install sweetspot to export reports.")
 	default:
@@ -279,8 +307,8 @@ func (d *Demo) State() string {
 		best = ranked[0].Name
 	}
 	b, _ := json.Marshal(map[string]any{
-		"score": m.score, "advice": m.advice, "tab": int(m.tab), "pinning": m.pinning, "busy": m.speedRunning,
-		"spots": m.spotsStore.Len(), "best": best, "gw": m.gwStats, "wan": m.wanStats, "quality": m.link.QualityLabel(),
+		"score": m.score, "advice": m.advice, "tab": int(m.tab), "pinning": m.pinning, "busy": m.speedRunning, "measured": m.speed.DownloadMbps > 0,
+		"spots": m.spotsStore.Len(), "best": best, "gw": m.gwStats, "wan": m.wanStats, "channel": m.link.ChannelLabel(), "bloat": m.speed.BloatDeltaMs, "down": m.speed.DownloadMbps,
 	})
 	return string(b)
 }
@@ -375,26 +403,17 @@ func applySGR(params string, fg, bg *uint32, bold, reverse *bool) {
 	}
 }
 
-func demoNeighbors(crowded bool) []wifi.NeighborAP {
-	list := []wifi.NeighborAP{
-		{Channel: 149, Band: wifi.Band5GHz, WidthMHz: 80, RSSI: -71}, {Channel: 157, Band: wifi.Band5GHz, WidthMHz: 80, RSSI: -78},
-		{Channel: 36, Band: wifi.Band5GHz, WidthMHz: 80, RSSI: -80}, {Channel: 100, Band: wifi.Band5GHz, WidthMHz: 80, RSSI: -84},
-		{Channel: 1, Band: wifi.Band2GHz, WidthMHz: 20, RSSI: -66}, {Channel: 1, Band: wifi.Band2GHz, WidthMHz: 20, RSSI: -73},
-		{Channel: 6, Band: wifi.Band2GHz, WidthMHz: 20, RSSI: -62}, {Channel: 6, Band: wifi.Band2GHz, WidthMHz: 20, RSSI: -70},
-		{Channel: 11, Band: wifi.Band2GHz, WidthMHz: 20, RSSI: -77},
+func demoNeighbors(list []DemoNeighbor) []wifi.NeighborAP {
+	out := make([]wifi.NeighborAP, 0, len(list))
+	for _, n := range list {
+		out = append(out, wifi.NeighborAP{Band: demoBand(n.Band), Channel: n.Channel, WidthMHz: n.WidthMHz, RSSI: n.RSSI})
 	}
-	if crowded {
-		for i := 0; i < 11; i++ {
-			list = append(list, wifi.NeighborAP{Channel: 36 + 4*(i%4), Band: wifi.Band5GHz, WidthMHz: 80, RSSI: -56 - 2*i})
-		}
-		for i := 0; i < 8; i++ {
-			list = append(list, wifi.NeighborAP{Channel: 1 + 5*(i%3), Band: wifi.Band2GHz, WidthMHz: 20, RSSI: -55 - 3*i})
-		}
-	}
-	return list
+	return out
 }
 
-func demoDNS() probe.DNSRaceResult {
+var demoServers = map[string]string{"isp": demoGateway, "cf": "1.1.1.1", "quad9": "9.9.9.9"}
+
+func demoDNS(kind string) probe.DNSRaceResult {
 	r := probe.DNSRaceResult{Entries: []probe.DNSBenchmark{
 		{Name: "Cloudflare", Server: "1.1.1.1", CachedMs: 9.4, UncachedMs: 17.8},
 		{Name: "Quad9", Server: "9.9.9.9", CachedMs: 11.2, UncachedMs: 24.6},
@@ -402,19 +421,34 @@ func demoDNS() probe.DNSRaceResult {
 		{Name: "System DNS", Server: "system", CachedMs: 14.1, UncachedMs: 46.5, IsSystem: true},
 		{Name: "Router", Server: demoGateway, CachedMs: 3.2, UncachedMs: 48.9},
 	}}
-	r.Fastest, r.System = r.Entries[0], r.Entries[3]
+	sys := &r.Entries[3]
+	switch kind {
+	case "cf":
+		sys.CachedMs, sys.UncachedMs = 9.6, 18.3
+	case "quad9":
+		sys.CachedMs, sys.UncachedMs = 11.5, 25.1
+	}
+	r.Fastest, r.System = r.Entries[0], *sys
 	return r
 }
 
-func demoModem(bad bool) string {
-	if bad {
+func demoModem(line string) string {
+	switch line {
+	case "good":
+		return "System Up Time: 38Days, 06:39:01\n" +
+			"1 Locked 256 QAM 24 603000000 Hz 1.3 dBmV 42.4 dB 34 0\n" +
+			"2 Locked 256 QAM 1 465000000 Hz 0.6 dBmV 42.2 dB 12 0\n" +
+			"1 Locked ATDMA 1 5120 Ksym/sec 18200000 Hz 41.3 dBmV\n"
+	case "weak":
 		return "System Up Time: 2Days, 04:11:09\n" +
 			"1 Locked 256 QAM 24 603000000 Hz -9.8 dBmV 31.2 dB 88213 40718\n" +
 			"2 Locked 256 QAM 1 465000000 Hz -10.6 dBmV 30.4 dB 91277 51930\n" +
 			"1 Locked ATDMA 1 5120 Ksym/sec 18200000 Hz 52.3 dBmV\n"
+	case "hot":
+		return "System Up Time: 11Days, 19:02:44\n" +
+			"1 Locked 256 QAM 24 603000000 Hz 13.4 dBmV 43.1 dB 20 0\n" +
+			"2 Locked 256 QAM 1 465000000 Hz 12.2 dBmV 43.0 dB 18 0\n" +
+			"1 Locked ATDMA 1 5120 Ksym/sec 18200000 Hz 33.8 dBmV\n"
 	}
-	return "System Up Time: 38Days, 06:39:01\n" +
-		"1 Locked 256 QAM 24 603000000 Hz 1.3 dBmV 42.4 dB 34 0\n" +
-		"2 Locked 256 QAM 1 465000000 Hz 0.6 dBmV 42.2 dB 12 0\n" +
-		"1 Locked ATDMA 1 5120 Ksym/sec 18200000 Hz 41.3 dBmV\n"
+	return ""
 }

@@ -73,26 +73,52 @@ h1 .line span { display: inline-block; white-space: pre; }
 @keyframes bob { to { margin-top: -7px; } }
 .legend { display: inline-flex; align-items: center; margin: 16px 0 0; padding: 7px 14px; border-radius: 99px; background: var(--ink); font-size: 15px; line-height: 1.2; }
 .legend i { width: clamp(20px, 7vw, 34px); height: 12px; }
-.legend span:first-child { margin-right: 10px; } .legend span:last-child { margin-left: 10px; }
+.legend span:first-of-type { margin-right: 10px; } .legend span:last-of-type { margin-left: 10px; }
 .legend i:nth-of-type(1) { background: var(--deep); border-radius: 6px 0 0 6px; } .legend i:nth-of-type(2) { background: var(--teal); } .legend i:nth-of-type(3) { background: var(--mint); } .legend i:nth-of-type(4) { background: var(--sun); } .legend i:nth-of-type(5) { background: var(--tang); } .legend i:nth-of-type(6) { background: var(--pink); border-radius: 0 6px 6px 0; }
-.break { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
-.break > span { font: 700 17px/1 var(--display); margin-right: 6px; }
-.break button, .picks button { border: 2px solid currentColor; background: none; border-radius: 99px; padding: 6px 15px; font-weight: 600; font-size: 16px; line-height: 1.4; }
-.break button:hover { background: #ffffff1f; }
-.break button[aria-pressed="true"] { background: var(--pink); border-color: var(--pink); color: var(--ink); }
-.break .sudo[aria-pressed="true"] { background: var(--mint); border-color: var(--mint); }
-.say { margin: 12px 0 0; font-size: 17px; min-height: 3.1em; max-width: 44em; }
+.legend em { display: none; font-style: normal; margin-left: 16px; padding-left: 30px; background: repeating-linear-gradient(-45deg, var(--foam) 0 2px, transparent 2px 6px) left / 20px 12px no-repeat; }
+.legend.dual em { display: inline; }
+.picks button { border: 2px solid currentColor; background: none; border-radius: 99px; padding: 6px 15px; font-weight: 600; font-size: 16px; line-height: 1.4; }
+
+/* Settings */
+.desk { position: relative; margin-top: 22px; }
+.setups { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+.setups > span { font: 700 19px/1 var(--display); margin-right: 8px; }
+.setups button { border: 2px solid currentColor; background: none; border-radius: 99px; padding: 5px 15px; font-weight: 600; font-size: 16px; line-height: 1.4; }
+.setups button:hover { background: var(--foam); border-color: var(--foam); color: var(--ink); }
+.say { margin: 12px 0 0; font-size: 18px; line-height: 1.4; min-height: 1.4em; }
+.panel { display: grid; grid-template-columns: 1.12fr 1fr 1fr; gap: 14px clamp(22px, 2.6vw, 44px); padding: 20px 26px 22px; border-radius: 18px; background: var(--ink); }
+.panel fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.panel legend { padding: 0; margin-bottom: 8px; font: 700 20px/1.2 var(--display); }
+.row { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 44px; font-size: 16px; line-height: 1.2; }
+.seg { display: flex; padding: 3px; border-radius: 10px; background: #ffffff1c; }
+.seg label { flex: 1 1 auto; position: relative; cursor: pointer; }
+.seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
+.seg span { display: block; padding: 6px 8px; border-radius: 8px; text-align: center; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.seg input:hover + span { background: #ffffff1c; }
+.seg input:checked + span { background: var(--sun); color: var(--ink); }
+.seg input:focus-visible + span { outline: 3px solid var(--foam); outline-offset: 1px; }
+.seg input:disabled { cursor: not-allowed; }
+.seg input:disabled + span { opacity: .35; background: none; }
+.seg input:disabled:checked + span { background: #ffffff1c; color: inherit; }
+.slide { display: flex; align-items: center; gap: 12px; }
+.slide input { flex: 1; min-width: 0; height: 30px; margin: 0; accent-color: var(--pink); cursor: pointer; }
+.slide output { min-width: 4ch; text-align: right; font: 700 15px/1 var(--mono); }
+.row select { width: 100%; font: 600 16px/1.2 var(--body); color: inherit; padding: 8px 10px; border: 0; border-radius: 10px; background: #ffffff1c; cursor: pointer; }
+.row option { color: var(--ink); background: var(--foam); }
+.top { display: flex; align-items: flex-start; gap: 14px; margin: 16px 0 0; min-height: 3.2em; font-size: 17px; line-height: 1.5; }
+.top .sev { flex: none; margin-top: 0; }
+.top .sev.GOOD { background: var(--mint); color: var(--ink); } .top .sev.TIP { background: var(--foam); color: var(--ink); }
+.fine { margin: 12px 0 0; font-size: 15px; line-height: 1.45; }
 
 /* Terminal. The stripes around it repeat the signal bands. */
 .rig { margin: 0; min-width: 0; padding: 12px; }
 .term { position: relative; background: var(--screen); border-radius: 12px; padding: 10px; overflow: hidden; box-shadow: 0 0 0 4px var(--pink), 0 0 0 8px var(--tang), 0 0 0 12px var(--sun); }
 .term canvas { display: block; margin: 0 auto; border-radius: 4px; }
 .term canvas:focus-visible { outline-offset: 2px; }
-.keys { display: flex; flex-wrap: wrap; gap: 8px; margin: 28px 0 0; }
-.keys button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 5px 12px 5px 6px; background: var(--ink); color: var(--foam); font-size: 15px; font-weight: 600; }
+.keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 26px 0 0; }
+.keys button { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; padding: 4px 9px 4px 5px; background: var(--ink); color: var(--foam); font-size: 14px; font-weight: 600; }
 .keys button:hover { background: #000; }
 kbd { display: inline-block; min-width: 1.9em; padding: 2px 7px; border-radius: 5px; background: var(--foam); color: var(--ink); font-size: 13px; font-weight: 700; line-height: 1.5; text-align: center; }
-figcaption { margin-top: 14px; font-size: 15px; line-height: 1.45; max-width: 40em; }
 
 /* Bands. Each section is one step closer to the router at the end of the page. */
 .band { position: relative; padding: 30px 0 190px; background: var(--bg); color: var(--fg); }
@@ -166,14 +192,13 @@ h2 { font-weight: 800; font-size: clamp(36px, 5.3vw, 78px); line-height: 1; lett
 footer { position: relative; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 40px; max-width: 1640px; margin: 90px auto 0; padding: 0 var(--pad); font-size: 15px; }
 footer p { margin: 0; }
 .still { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 410; object-fit: cover; object-position: bottom; border-radius: 12px; }
-@media (max-width: 380px) { .brand span { display: none; } }
 .nojs { position: fixed; bottom: 0; left: 0; right: 0; margin: 0; padding: 12px; text-align: center; background: var(--sun); color: var(--ink); }
 
 @media (max-width: 1080px) {
   .stage, .tour, .agent, .split { grid-template-columns: minmax(0, 1fr); }
   .pitch { grid-template-columns: minmax(0, 1fr); }
   .nav nav { display: none; } .meter { margin-left: auto; }
-  .ways { grid-template-columns: minmax(0, 1fr); }
+  .ways, .panel { grid-template-columns: minmax(0, 1fr); }
   .term.big { margin: 12px 0; }
 }
 @media (max-width: 640px) {
@@ -190,7 +215,9 @@ footer p { margin: 0; }
   .diff table { font-size: 14px; } .diff th, .diff td { white-space: normal; padding-right: 8px; } .diff .top td:last-child { font-size: 17px; }
   .cmd code { font-size: 13px; padding: 12px; white-space: normal; overflow-wrap: anywhere; } .cmd button { min-width: 70px; padding: 0 12px; }
   .get, .get .cmd { min-width: 0; }
-  .break button { font-size: 15px; padding: 5px 12px; } .break > span { width: 100%; }
+  .setups button { font-size: 15px; padding: 5px 12px; } .setups > span { width: 100%; }
+  .panel { padding: 16px 16px 18px; } .row { grid-template-columns: 88px minmax(0, 1fr); gap: 8px; } .seg span { padding: 7px 4px; font-size: 14px; }
+  .top { flex-direction: column; gap: 8px; min-height: 7em; } .say { min-height: 2.8em; }
   .hops { height: 230px; } .hop { padding: 18px 14px; } .verdict { grid-template-columns: 1fr; gap: 12px; } .sev { justify-self: start; }
   .code, .diff { padding: 18px; } .code { font-size: 13px; }
   .band { padding-bottom: 130px; }
@@ -199,3 +226,4 @@ footer p { margin: 0; }
   html { scroll-behavior: auto; }
   .nudge { animation: none; }
 }
+@media (max-width: 380px) { .brand span { display: none; } .row { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 4px 0; } .seg span { padding: 7px 2px; font-size: 13px; } }
